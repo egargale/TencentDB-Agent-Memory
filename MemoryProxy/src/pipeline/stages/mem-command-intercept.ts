@@ -15,6 +15,7 @@
  */
 
 import type { ProxyConfig } from "../../types.js";
+import { t } from "../../i18n/lang.js";
 import type { TdaiClient } from "../../tdai/client.js";
 import { recordTdaiTurn } from "../../tdai/recorder.js";
 import { deriveTdaiIdentity } from "../../tdai/identity.js";
@@ -131,7 +132,10 @@ export async function stageMemCommandIntercept(
 
   // 未初始化 → 错误响应
   if (!sessionInfo || injectionSkipped) {
-    const errText = `⚠️ 会话未初始化，命令不可用。请先完成 session 初始化（选择 Team/Agent）后重试。`;
+    const errText = t(
+      `⚠️ 会话未初始化，命令不可用。请先完成 session 初始化（选择 Team/Agent）后重试。`,
+      "⚠️ This session is not initialised, so mem: commands are unavailable. Finish session init (choose a Team/Agent) and retry.",
+    );
     console.log(`[mem-command] cmd=${memCmd.command} args="${truncateArgs(memCmd.args)}" session=${sessionKey} blocked: session not initialized`);
     return buildMemResponse(errText, {
       protocol,

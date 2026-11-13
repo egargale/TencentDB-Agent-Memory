@@ -9,6 +9,7 @@
  *   # or with deps installed: npx tsx scripts/i18n-check.ts
  */
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const SELF = fileURLToPath(import.meta.url);
@@ -54,8 +55,7 @@ async function render(): Promise<Record<string, string>> {
 }
 
 /** Structural tokens that must survive translation (whitelist only — prose
- * contains `<>` and snake_case too, so a generic regex is useless here). */
-function tokens(text: string): string[] {
+ * contains `<>` and snake_case too, so a generic regex is useless here). */function tokens(text: string): string[] {
   const out = new Set<string>();
   const add = (re: RegExp, fmt?: (m: RegExpMatchArray) => string) => {
     for (const m of text.matchAll(re)) out.add(fmt ? fmt(m) : m[1] ?? m[0]);
@@ -72,7 +72,158 @@ function tokens(text: string): string[] {
   return [...out].sort();
 }
 
+/**
+ * Files whose Chinese is reachable by a Claude Code session. Every CJK literal
+ * here must sit inside `t(zh, en)`; an unwrapped one is a string the agent will
+ * see in Chinese (this is what the static scan catches).
+ *
+ * Not listed on purpose: the zh renderers in `injection/injectors/*.ts` (guarded
+ * by an `isEn` early-return and checked dynamically below), `commands/help.ts`
+ * (single HELP_TEXT const, checked through getHelpText), and the other clients'
+ * form builders, which this fork does not translate.
+ */
+const STATIC_TARGETS = [
+  "src/pipeline/stages/mem-command-intercept.ts",
+  "src/pipeline/stages/session-init-orchestrate.ts",
+  "src/pipeline/runners/anthropic.ts",
+  "src/mem-command/index.ts",
+  "src/mem-command/parser.ts",
+  "src/mem-command/pre-intercept.ts",
+  "src/mem-command/task-draft-generator.ts",
+  "src/mem-command/commands/config-lock.ts",
+  "src/mem-command/commands/config-unlock.ts",
+  "src/mem-command/commands/create-skill.ts",
+  "src/mem-command/commands/create-task.ts",
+  "src/mem-command/commands/session-reset.ts",
+  "src/mem-command/commands/sync.ts",
+  "src/mem-command/commands/update-task.ts",
+  "src/session/store.ts",
+  "src/session/user-default.ts",
+  "src/session/claude-code/form.ts",
+  "src/session/claude-code/init.ts",
+  "src/session/claude-code/extractor.ts",
+  "src/session/claude-code/cleaner.ts",
+  "src/session/claude-code/pagination.ts",
+];
+
+/**
+ * Scan JS/TS source for string literals that contain CJK and are NOT inside a
+ * `t(...)` call. Tracked: string literals, template literals with `${}`
+ * interpolation, regex literals, and paren depth (so `t(\`...${a ?? "x"}\`)`
+ * counts as covered while a sibling literal does not).
+ */
+function scanCjkLiterals(src: string): Array<{ line: number; text: string }> {
+  const bad: Array<{ line: number; text: string }> = [];
+  const openT: number[] = []; // paren depth at which each `t(` was opened
+  let depth = 0;
+  let i = 0;
+  const n = src.length;
+  const lineOf = (at: number) => src.slice(0, at).split("\n").length;
+
+  const prevMeaningful = (at: number): string => {
+    let j = at - 1;
+    while (j >= 0 && /\s/.test(src[j])) j--;
+    return j >= 0 ? src[j] : "";
+  };
+
+  while (i < n) {
+    const c = src[i];
+    // regex literal
+    if (c === "/" && src[i + 1] !== "/" && src[i + 1] !== "*" && /[(,=:[!&|?{};+\-*/%~^]|^$/.test(prevMeaningful(i))) {
+      i++;
+      let inClass = false;
+      while (i < n) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === "[") inClass = true;
+        else if (src[i] === "]") inClass = false;
+        else if (src[i] === "/" && !inClass) { i++; break; }
+        else if (src[i] === "\n") break;
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") {
+      const quote = c;
+      const at = i;
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (quote !== "`" && src[i] === "\n") break; // unterminated
+        if (src[i] === quote) { i++; break; }
+        i++;
+      }
+      const text = src.slice(at, i);
+      if (CJK.test(text) && openT.length === 0 && !cjkOnlyInsideTranslatedInterpolation(text)) {
+        bad.push({ line: lineOf(at), text: text.replace(/\s+/g, " ").slice(1, 71) });
+      }
+      continue;
+    }
+    if (c === "(") {
+      depth++;
+      // `t(` — identifier check on the previous non-space char run
+      let j = i - 1;
+      while (j >= 0 && /\s/.test(src[j])) j--;
+      if (j >= 0 && src[j] === "t" && !/[\w$.]/.test(src[j - 1] ?? "")) openT.push(depth);
+      i++;
+      continue;
+    }
+    if (c === ")") {
+      if (openT.length > 0 && openT[openT.length - 1] === depth) openT.pop();
+      depth--;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  return bad;
+}
+
+/**
+ * Template literals can carry the Chinese only inside an interpolation that is
+ * itself translated, e.g. `` `- Task: ${cond ? t("中文", "en") : x}` `` — the
+ * literal's own text is ASCII, so it is not a leak. True when every CJK char of
+ * `text` sits inside a `${...}` region that contains a `t(` call.
+ */
+function cjkOnlyInsideTranslatedInterpolation(text: string): boolean {
+  if (!text.includes("${")) return false;
+  const translated: Array<[number, number]> = [];
+  for (let i = 0; i < text.length - 1; i++) {
+    if (text[i] !== "$" || text[i + 1] !== "{") continue;
+    let depth = 1;
+    let j = i + 2;
+    for (; j < text.length && depth > 0; j++) {
+      if (text[j] === "{") depth++;
+      else if (text[j] === "}") depth--;
+    }
+    const region = text.slice(i, j);
+    if (/\bt\(/.test(region)) translated.push([i, j]);
+  }
+  if (translated.length === 0) return false;
+  for (let k = 0; k < text.length; k++) {
+    if (!CJK.test(text[k])) continue;
+    if (!translated.some(([a, b]) => k >= a && k < b)) return false;
+  }
+  return true;
+}
+
+/** Every CJK literal in STATIC_TARGETS must be inside a `t(...)` call. */
+function staticScan(): boolean {
+  let failed = false;
+  for (const rel of STATIC_TARGETS) {
+    const path = fileURLToPath(new URL(`../${rel}`, import.meta.url));
+    const src = readFileSync(path, "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+      .replace(/^\s*\/\/.*$/gm, (m) => " ".repeat(m.length));
+    for (const hit of scanCjkLiterals(src)) {
+      console.error(`✗ ${rel}:${hit.line}: Chinese literal outside t(): ${hit.text}`);
+      failed = true;
+    }
+  }
+  return failed;
+}
+
 if (!process.argv.includes("--child")) {
+  const failedStatic = staticScan();
   const run = (lang: string) => {
     const res = spawnSync(process.execPath, ["--import", "tsx/esm", SELF, "--child"], {
       env: { ...process.env, PROXY_LANG: lang },
@@ -87,7 +238,7 @@ if (!process.argv.includes("--child")) {
 
   const zh = run("zh");
   const en = run("en");
-  let failed = false;
+  let failed = failedStatic;
 
   for (const name of Object.keys(en)) {
     const hit = CJK.exec(en[name]);

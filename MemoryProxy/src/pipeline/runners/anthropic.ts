@@ -8,6 +8,7 @@
  */
 
 import type { Context } from "hono";
+import { t } from "../../i18n/lang.js";
 import { createHash } from "node:crypto";
 import { writeLog, createPipeline } from "../../logger.js";
 import { applyMainModel } from "../../mainModel.js";
@@ -873,7 +874,7 @@ export async function runAnthropicPipeline(
       // 记录 resetFlow 到外层供块外返回确认响应
       if (initResult.resetFlow && initResult.justRegistered && !initResult.bypassed) {
         _resetFlowResult = {
-          agentName: initResult.agentDetail?.name ?? "未知",
+          agentName: initResult.agentDetail?.name ?? t("未知", "unknown"),
           // agentIdShort 字段名沿用历史，但此处**存完整 agent_id**（如 agt-1celthr7yn）。
           // 之前 slice(-8) 会截断成 "elthr7yn" 用户看不懂，与 team 截断问题对称。
           agentIdShort: initResult.sessionInfo?.agent_id
@@ -965,7 +966,10 @@ export async function runAnthropicPipeline(
       callerUserKey: callerUserKey ?? undefined,
       isStream, protocol: "anthropic",
       modelId: modelId as string,
+      // 与 resolve-target-full.ts 的 defaultUpstreamUrl 对齐：漏掉 anthropicUpstream
+      // 会让 taskDraft 打到 upstream.url（OpenAI 路径）→ Bifrost 返 405 Method Not Allowed。
       upstreamUrl: (agentFromPath ? config.upstream.agents?.[agentFromPath]?.url : undefined) ||
+        config.costGuard.anthropicUpstream?.url ||
         config.upstream.url,
       messages: messages as unknown[],
       createTdaiClientFn: createTdaiClient,
