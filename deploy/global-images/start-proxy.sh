@@ -73,6 +73,18 @@ fi
 
 bool() { [[ "$1" == "1" ]] && echo "true" || echo "false"; }
 
+# Anthropic 协议的上游可以单独指定：只要 base 不带 /vN，proxy 会自动补 /v1/messages。
+# 多协议网关（如 Bifrost）不支持 unified /v1/messages，必须指向它自己的 /anthropic 挂载。
+COST_GUARD_ANTHROPIC=""
+if [[ -n "${PROXY_ANTHROPIC_UPSTREAM_URL:-}" ]]; then
+  COST_GUARD_ANTHROPIC=$(printf '  anthropicUpstream:\n    url: "%s"' "$PROXY_ANTHROPIC_UPSTREAM_URL")
+fi
+
+PROXY_INJECTION_EXTERNAL_GATEWAY_URL_LINE=""
+if [[ -n "${PROXY_EXTERNAL_GATEWAY_URL:-}" ]]; then
+  PROXY_INJECTION_EXTERNAL_GATEWAY_URL_LINE=$(printf '  externalGatewayUrl: "%s"' "$PROXY_EXTERNAL_GATEWAY_URL")
+fi
+
 info "生成 proxy config → $CONFIG_FILE  (auth=$(bool $PROXY_ENABLE_AUTH) session-init=$(bool $PROXY_ENABLE_SESSION_INIT) tdai=$(bool $PROXY_ENABLE_TDAI))"
 cat > "$CONFIG_FILE" <<YAML
 # 由 start-proxy.sh 自动生成 —— 每次启动覆盖，请不要手动改。
@@ -135,6 +147,7 @@ sessionInit:
 
 costGuard:
   enabled: false
+${COST_GUARD_ANTHROPIC}
 
 # 打开 skill + knowledge + tdai-memory 三个注入器；
 # knowledge 依赖 memory-hub 起来，否则 hook 内部会降级为空块。
@@ -144,7 +157,10 @@ injection:
     - skill
     - knowledge
     - tdai-memory
-
+# 可选：注入文本里 <skill_tools>/<tdai_memory_tools> 的 curl base。留空时退化为
+# 容器网卡 IP（如 172.19.0.x），宿主机上的 agent 根本连不到。
+# 填成 agent 能访问的地址（本机 127.0.0.1:8096 / 局域网 IP / 网关域名）。
+${PROXY_INJECTION_EXTERNAL_GATEWAY_URL_LINE}
 redis:
   enabled: false
 YAML
