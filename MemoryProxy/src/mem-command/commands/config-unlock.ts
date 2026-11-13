@@ -19,6 +19,7 @@
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
+import { t } from "../../i18n/lang.js";
 import { buildMemResponse } from "../response-builder.js";
 import { getMetadataClient } from "../../meta/client.js";
 
@@ -40,9 +41,9 @@ export async function executeConfigUnlock(ctx: MemCommandContext): Promise<MemCo
       `[mem-command:config-unlock] deleteUserSessionDefault failed for user=${ctx.userId}: ${raw}`,
     );
     const text = [
-      "❌ 清除账户级默认失败。",
+      t("❌ 清除账户级默认失败。", "❌ Failed to clear the account-level default."),
       "",
-      `原始错误: ${raw}`,
+      t(`原始错误: ${raw}`, `Raw error: ${raw}`),
     ].join("\n");
     return {
       success: false,
@@ -61,10 +62,13 @@ export async function executeConfigUnlock(ctx: MemCommandContext): Promise<MemCo
   );
 
   const text = [
-    "✅ 已清除账户级默认配置",
+    t("✅ 已清除账户级默认配置", "✅ Account-level default configuration cleared"),
     "",
-    "下次新开 Session 将恢复「是否关联团队资产 → Team → Agent → Task」的手动选择流程。",
-    "本次对话不受影响，继续按当前 Agent 的身份进行。",
+    t(
+      "下次新开 Session 将恢复「是否关联团队资产 → Team → Agent → Task」的手动选择流程。",
+      "New sessions will go back to the manual flow: attach team assets → Team → Agent → Task.",
+    ),
+    t("本次对话不受影响，继续按当前 Agent 的身份进行。", "This conversation is unaffected and keeps using the current Agent identity."),
   ].join("\n");
 
   return {

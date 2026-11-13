@@ -37,6 +37,8 @@ import {
   type KnowledgeItem,
 } from "../../knowledge/core-client.js";
 import type { CoreSkillConfig } from "../../types.js";
+import { isEn } from "../../i18n/lang.js";
+import { renderKnowledgeToolsBlockEn } from "./i18n/knowledge-tools.en.js";
 
 const TAG = "[knowledge-tools-injector]";
 
@@ -58,7 +60,7 @@ function shellQuote(value: string): string {
   return "'" + value.replaceAll("'", "'\"'\"'") + "'";
 }
 
-function renderHeader(name: string, value: string): string {
+export function renderHeader(name: string, value: string): string {
   return "  -H " + shellQuote(`${name}: ${value}`) + " \\";
 }
 
@@ -101,7 +103,7 @@ function filterResourcesByCapabilities(
  * and repo slugs are operator-supplied, so a stray `"` would otherwise break
  * the `<knowledge .../>` tag structure the agent parses.
  */
-function xmlAttrEscape(value: string): string {
+export function xmlAttrEscape(value: string): string {
   return value
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
@@ -110,7 +112,7 @@ function xmlAttrEscape(value: string): string {
 }
 
 /** Render `\n  name="escaped"`, or "" when the value is absent/blank. */
-function attr(name: string, value: string | undefined | null): string {
+export function attr(name: string, value: string | undefined | null): string {
   if (!value) return "";
   const trimmed = value.trim();
   if (!trimmed) return "";
@@ -125,7 +127,7 @@ function attr(name: string, value: string | undefined | null): string {
  * undefined when the URL is absent or yields no usable path (e.g. wiki
  * resources, which have no repo).
  */
-function deriveRepoSlug(repoUrl: string | undefined): string | undefined {
+export function deriveRepoSlug(repoUrl: string | undefined): string | undefined {
   if (!repoUrl) return undefined;
   const withoutScheme = repoUrl.replace(/^[a-z0-9+.-]+:\/\//i, "");
   // scp-like syntax (`git@host:org/repo.git`) — split on the first colon.
@@ -142,6 +144,7 @@ export function renderKnowledgeToolsBlock(
   telemetryContext: KnowledgeTelemetryContext = {},
 ): string | null {
   if (!resources || resources.length === 0) return null;
+  if (isEn) return renderKnowledgeToolsBlockEn(resources, serviceId, telemetryContext);
 
   const telemetryHeaders: Array<[string, string | undefined]> = [
     ["x-conversation-id", telemetryContext.sessionKey],

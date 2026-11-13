@@ -43,6 +43,8 @@ import type {
 } from "../types.js";
 import { HOOK_PRIORITY } from "../types.js";
 import { getTdaiIdentity } from "../../tdai/identity.js";
+import { isEn } from "../../i18n/lang.js";
+import { renderTdaiMemoryToolsBlockEn } from "./i18n/tdai-tools.en.js";
 
 export interface TdaiMemoryToolsInjectorConfig {
   /**
@@ -58,6 +60,7 @@ export function renderTdaiMemoryToolsBlock(
   sessionId?: string,
   spaceId?: string,
 ): string {
+  if (isEn) return renderTdaiMemoryToolsBlockEn(proxyBaseUrl, sessionId, spaceId);
   const base = proxyBaseUrl.replace(/\/$/, "");
   const bridge = `${base}/memory-bridge/v3`;
   // gateway 需要 `x-tdai-service-id: <spaceId>` 才放行；`x-conversation-id`

@@ -27,6 +27,8 @@
  * See `docs/design/2026-06-17-team-skill-proxy-runtime.md` §4.
  */
 
+import { isEn } from "../../i18n/lang.js";
+import { renderSkillToolsBlockEn } from "./i18n/skill-tools.en.js";
 import type {
   AgentContext,
   AnchorTarget,
@@ -55,13 +57,13 @@ export interface SkillToolsInjectorConfig {
 /**
  * Render the entire `<skill_tools>` block as a single text string. Pure
  * function for ease of testing.
- */
-export function renderSkillToolsBlock(
+ */export function renderSkillToolsBlock(
   proxyBaseUrl: string,
   allowLlmWrite = true,
   sessionId?: string,
   spaceId?: string,
 ): string {
+  if (isEn) return renderSkillToolsBlockEn(proxyBaseUrl, allowLlmWrite, sessionId, spaceId);
   const base = proxyBaseUrl.replace(/\/$/, "");
   const bridge = `${base}/skill-bridge/v3/skill`;
 

@@ -28,6 +28,7 @@ import type {
   InjectionHook,
 } from "../types.js";
 import { HOOK_PRIORITY } from "../types.js";
+import { t } from "../../i18n/lang.js";
 import { hasAnalyseMarker } from "../../routes/whitelist.js";
 
 export interface AssetReflectionInjectorConfig {
@@ -43,22 +44,22 @@ export function renderAssetReflectionBlock(tags: string[]): string {
   const tagList = tags.map((t) => `<${t}>`).join(" / ");
   return [
     "<asset_reflection>",
-    "**内部效果评估模式** —— 本次系统提示词中包含以下云端资产工具块：",
+    t("**内部效果评估模式** —— 本次系统提示词中包含以下云端资产工具块：", "**Internal effectiveness-evaluation mode** — this system prompt contains the following cloud asset tool blocks:"),
     `  ${tagList}`,
     "",
-    "如果本轮对话你**真的调用过**其中任一工具（无论走 Bash curl 还是 MCP 调用），",
-    "请在最终回答的**末尾**追加一段简短复盘，格式固定如下：",
+    t("如果本轮对话你**真的调用过**其中任一工具（无论走 Bash curl 还是 MCP 调用），", "If you **actually called** any of these tools in this turn (whether via Bash curl or MCP),"),
+    t("请在最终回答的**末尾**追加一段简短复盘，格式固定如下：", "append a short retrospective at the **end** of your final answer, in exactly this format:"),
     "",
-    "【资产反思】",
-    "- <tag>::<tool_name>：一句话说明这次调用**是否起到作用**（拿到什么关键信息 / 帮你少走什么弯路 / 或为什么没命中）",
-    "- ...（每调用过一个工具占一行；同一工具多次调用可合并成一行说清整体作用）",
+    t("【资产反思】", "[Asset reflection]"),
+    t("- <tag>::<tool_name>：一句话说明这次调用**是否起到作用**（拿到什么关键信息 / 帮你少走什么弯路 / 或为什么没命中）", "- <tag>::<tool_name>: one sentence on **whether the call helped** (what key information it returned / which detour it saved / or why it missed)"),
+    t("- ...（每调用过一个工具占一行；同一工具多次调用可合并成一行说清整体作用）", "- ... (one line per tool used; repeated calls to the same tool may be merged into one line describing the overall effect)"),
     "",
-    "规则：",
-    "- **只对本轮真的调用过的工具作复盘**；没调过的一律不列，别猜、别自补。",
-    "- 若本轮完全没调用任何上述资产工具，仍需输出：",
-    "  【资产反思】本轮未使用任何云端资产工具。",
-    "- 复盘务必简短诚实——工具没帮上忙也直接说，用来做接入效果评估，不是要正面评价。",
-    "- 此段仅供内部评估，不构成正式结论；请与主回答用清晰分隔（如空行 + 「---」）。",
+    t("规则：", "Rules:"),
+    t("- **只对本轮真的调用过的工具作复盘**；没调过的一律不列，别猜、别自补。", "- **Only review tools you actually called this turn**; never list the others, do not guess or pad."),
+    t("- 若本轮完全没调用任何上述资产工具，仍需输出：", "- If you called none of these asset tools this turn, still output:"),
+    t("  【资产反思】本轮未使用任何云端资产工具。", "  [Asset reflection] No cloud asset tools were used this turn."),
+    t("- 复盘务必简短诚实——工具没帮上忙也直接说，用来做接入效果评估，不是要正面评价。", "- Keep it short and honest — say so plainly when a tool did not help. This is integration evaluation, not a pitch."),
+    t("- 此段仅供内部评估，不构成正式结论；请与主回答用清晰分隔（如空行 + 「---」）。", "- This section is for internal evaluation only and is not a formal conclusion; separate it clearly from the main answer (e.g. a blank line + ---)."),
     "</asset_reflection>",
   ].join("\n");
 }

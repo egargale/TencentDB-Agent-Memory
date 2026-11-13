@@ -68,12 +68,12 @@ export function extractAssetConfirm(content: string): boolean | null {
   }
 
   if (allowLoosePattern) {
-    // 宽松"是"匹配：必须以"是"或"确认"开头，避免"是否"、"不是"等误匹配
-    if (/^(?:是|确认)[，,\s]/i.test(answerOnly.trim())) {
+    // Loose "yes": must start with 是/确认/yes, avoiding 是否 / 不是 false hits
+    if (/^(?:是|确认|yes)[，,\s]/i.test(answerOnly.trim())) {
       return true;
     }
-    // 宽松"否"匹配
-    if (/^(?:否|不[，,\s]|跳过|skip)/i.test(answerOnly.trim())) {
+    // Loose "no"
+    if (/^(?:否|不[，,\s]|跳过|skip|no[,.\s])/i.test(answerOnly.trim())) {
       return false;
     }
   }

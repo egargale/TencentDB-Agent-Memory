@@ -165,12 +165,13 @@ redis:
   enabled: false
 YAML
 
-info "启动 proxy (image=$PROXY_IMAGE, port=$PROXY_PORT)"
+info "启动 proxy (image=$PROXY_IMAGE, port=$PROXY_PORT, lang=${PROXY_LANG:-en})"
 $DOCKER run -d --name "$CONTAINER" \
   --network "$NETWORK" \
   --network-alias proxy \
   --add-host=host.docker.internal:host-gateway \
   -p "${PROXY_PORT}:8096" \
+  ${PROXY_LANG:+-e PROXY_LANG="$PROXY_LANG"} \
   -v "$CONFIG_FILE:/data/config.yaml:ro" \
   "$PROXY_IMAGE" >/dev/null
 

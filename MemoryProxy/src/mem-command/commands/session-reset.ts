@@ -22,6 +22,7 @@ import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { getSessionStore } from "../../session/store.js";
 import type { SessionInitState } from "../../session/types.js";
+import { t } from "../../i18n/lang.js";
 
 export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
@@ -129,14 +130,14 @@ export async function executeSessionReset(ctx: MemCommandContext): Promise<MemCo
  */
 function buildSuccessMessage(oldStatus: string, oldBypassed: boolean): string {
   if (oldStatus === "uninitialized") {
-    return "✅ 已重置,继续对话时会弹出团队资产选择";
+    return t("✅ 已重置,继续对话时会弹出团队资产选择", "✅ Reset — the team-asset picker will appear on your next turn");
   }
   if (oldBypassed) {
-    return "✅ 已恢复团队资产选择入口,继续对话时会弹出重新选择";
+    return t("✅ 已恢复团队资产选择入口,继续对话时会弹出重新选择", "✅ Team-asset selection restored — you will be asked to choose again on your next turn");
   }
   if (oldStatus === "initialized") {
-    return "✅ 已解除本次会话的团队资产绑定,继续对话时会弹出重新选择";
+    return t("✅ 已解除本次会话的团队资产绑定,继续对话时会弹出重新选择", "✅ Team-asset binding cleared for this session — you will be asked to choose again on your next turn");
   }
   // pending_*
-  return "✅ 已重新开始团队资产选择,继续对话时会弹出选择";
+  return t("✅ 已重新开始团队资产选择,继续对话时会弹出选择", "✅ Team-asset selection restarted — the picker will appear on your next turn");
 }

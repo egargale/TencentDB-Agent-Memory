@@ -29,6 +29,16 @@ import type { BindingRepo, SessionBinding } from "../db/binding-repo.js";
 import type { MetadataClient } from "../meta/client.js";
 import { isDshRuntimeContextSnapshot } from "../common/user-query-extractor.js";
 import type { PresetIdentity } from "./preset.js";
+import {
+  SKIP_LABEL as CC_SKIP_LABEL,
+  ASSET_CONFIRM_YES as CC_ASSET_CONFIRM_YES,
+  ASSET_CONFIRM_NO as CC_ASSET_CONFIRM_NO,
+} from "./claude-code/form.js";
+import {
+  SKIP_LABEL as CB_SKIP_LABEL,
+  ASSET_CONFIRM_YES as CB_ASSET_CONFIRM_YES,
+  ASSET_CONFIRM_NO as CB_ASSET_CONFIRM_NO,
+} from "./codebuddy/form.js";
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
@@ -750,11 +760,18 @@ export class SessionStore {
               const input = block.input as Record<string, unknown> | undefined;
               const question = (input?.question as string) ?? "";
               const options = input?.options as string[] | undefined;
-              if (question.includes("关联") || question.includes("资产")) {
+              // Language-agnostic: match the option labels, never the prose.
+              const isAssetConfirm = (options ?? []).some((o) =>
+                [CC_ASSET_CONFIRM_YES, CC_ASSET_CONFIRM_NO, CB_ASSET_CONFIRM_YES, CB_ASSET_CONFIRM_NO].includes(o),
+              );
+              if (isAssetConfirm) {
                 // asset_confirm form — check if the next user message said "否"
                 continue; // defer to extractAssetConfirm logic via bypass detection
               }
-              if (options?.includes("否，本次不关联") || options?.includes("跳过") || question.includes("SKIP")) {
+              const isSkipLabel = (options ?? []).some((o) =>
+                [CC_SKIP_LABEL, CB_SKIP_LABEL, CC_ASSET_CONFIRM_NO, CB_ASSET_CONFIRM_NO].includes(o),
+              );
+              if (isSkipLabel || question.includes("SKIP")) {
                 foundBypass = true;
               }
               if (question.includes("agent") || question.includes("Agent")) {
@@ -771,7 +788,7 @@ export class SessionStore {
       // CodeBuddy: <question_answer> XML in string content
       if (!content.includes("<question_answer")) continue;
       // Check for asset_confirm bypass markers in the assistant form message
-      if (content.includes("否，本次不关联") || content.includes("本次不关联")) {
+      if (content.includes(CC_ASSET_CONFIRM_NO) || content.includes(CB_ASSET_CONFIRM_NO)) {
         foundBypass = true;
       }
       // Extract agent_id from <question_item id="agent">

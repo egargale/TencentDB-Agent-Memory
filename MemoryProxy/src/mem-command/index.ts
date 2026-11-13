@@ -11,6 +11,7 @@
 
 import type { MemCommandContext, MemCommandResult } from "./types.js";
 import { parseMemCommand, parseCommandFromText, type ParsedMemCommand } from "./parser.js";
+import { t } from "../i18n/lang.js";
 import { buildMemResponse } from "./response-builder.js";
 import { executeHelp } from "./commands/help.js";
 import { executeSync } from "./commands/sync.js";
@@ -51,7 +52,10 @@ export async function executeMemCommand(
 
   // 未知命令
   if (!KNOWN_COMMANDS.has(cmd.command)) {
-    const text = `❌ 未知命令：\`mem:${cmd.command}\`。输入 \`mem:help\` 查看可用命令。`;
+    const text = t(
+      `❌ 未知命令：\`mem:${cmd.command}\`。输入 \`mem:help\` 查看可用命令。`,
+      `❌ Unknown command: \`mem:${cmd.command}\`. Run \`mem:help\` for the available commands.`,
+    );
     return {
       success: false,
       messageText: text,
@@ -77,7 +81,7 @@ export async function executeMemCommand(
     case "config-unlock":
       return executeConfigUnlock(ctx);
     default: {
-      const text = `❌ 未知命令：\`mem:${cmd.command}\``;
+      const text = t(`❌ 未知命令：\`mem:${cmd.command}\``, `❌ Unknown command: \`mem:${cmd.command}\``);
       return {
         success: false,
         messageText: text,

@@ -13,15 +13,19 @@
 import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { refreshSessionCache, type RefreshResult } from "../../routes/session-refresh.js";
+import { t } from "../../i18n/lang.js";
 
 function buildSuccessMessage(result: RefreshResult): string {
   const parts: string[] = [];
-  parts.push("Skill / 记忆 / Knowledge 资产");
+  parts.push(t("Skill / 记忆 / Knowledge 资产", "Skill / memory / Knowledge assets"));
   if (result.agentRefreshed || result.taskRefreshed) {
-    parts.push("Task & Agent 描述");
+    parts.push(t("Task & Agent 描述", "Task & Agent descriptions"));
   }
-  const scope = parts.join("、");
-  return `✅ 所有资产注入已刷新（${scope}），耗时 ${result.tookMs}ms`;
+  const scope = parts.join(t("、", ", "));
+  return t(
+    `✅ 所有资产注入已刷新（${scope}），耗时 ${result.tookMs}ms`,
+    `✅ All asset injections refreshed (${scope}) in ${result.tookMs}ms`,
+  );
 }
 
 export async function executeSync(ctx: MemCommandContext): Promise<MemCommandResult> {
@@ -29,7 +33,10 @@ export async function executeSync(ctx: MemCommandContext): Promise<MemCommandRes
 
   // 未绑定时不走 refreshSessionCache(它会暴露 session key 给用户)
   if (!ctx.sessionInfo || Object.keys(ctx.sessionInfo).length === 0) {
-    const messageText = "⚠️ 当前会话未绑定团队资产，无法同步。请先用 `mem:session-reset` 选择 Team/Agent 后再试。";
+    const messageText = t(
+      "⚠️ 当前会话未绑定团队资产，无法同步。请先用 `mem:session-reset` 选择 Team/Agent 后再试。",
+      "⚠️ This session has no team assets bound, so there is nothing to sync. Run `mem:session-reset` to pick a Team/Agent first.",
+    );
     return {
       success: false,
       messageText,
@@ -47,7 +54,7 @@ export async function executeSync(ctx: MemCommandContext): Promise<MemCommandRes
 
   const messageText = result.success
     ? buildSuccessMessage(result)
-    : `❌ 资产刷新失败：${result.error ?? "未知错误"}`;
+    : t(`❌ 资产刷新失败：${result.error ?? "未知错误"}`, `❌ Asset refresh failed: ${result.error ?? "unknown error"}`);
 
   const response = buildMemResponse(messageText, {
     protocol: ctx.protocol,

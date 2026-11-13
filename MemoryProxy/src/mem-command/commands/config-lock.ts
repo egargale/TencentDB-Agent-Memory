@@ -41,6 +41,7 @@
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
+import { t } from "../../i18n/lang.js";
 import type { SessionInfo } from "../../session/types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { getSessionStore } from "../../session/store.js";
@@ -74,14 +75,14 @@ function readCurrentSelection(
   if (!state || state.status !== "initialized" || state.bypassed === true) {
     return {
       error:
-        "ℹ️ 本次会话尚未完成团队资产选择 (bypass / 未初始化)，无法保存为默认。请先对话一两轮确认 Team/Agent 选择，再执行 `mem:config-lock`。",
+        t("ℹ️ 本次会话尚未完成团队资产选择 (bypass / 未初始化)，无法保存为默认。请先对话一两轮确认 Team/Agent 选择，再执行 `mem:config-lock`。", `ℹ️ This session has not finished choosing team assets (bypass / not initialised), so it cannot be saved as a default. Chat a turn or two to confirm the Team/Agent choice, then run \`mem:config-lock\` again.`),
     };
   }
 
   const sessionInfo = state.sessionInfo as SessionInfo | null | undefined;
   if (!sessionInfo) {
     return {
-      error: "ℹ️ 本次会话状态异常 (缺 sessionInfo)，无法保存默认。请执行 `mem:session-reset` 重走选择表单后再试。",
+      error: t("ℹ️ 本次会话状态异常 (缺 sessionInfo)，无法保存默认。请执行 `mem:session-reset` 重走选择表单后再试。", `ℹ️ This session is in an unexpected state (missing sessionInfo), so no default can be saved. Run \`mem:session-reset\` to go through the selection form again.`),
     };
   }
 
@@ -90,7 +91,7 @@ function readCurrentSelection(
   if (!teamId || !agentId) {
     return {
       error:
-        "ℹ️ 本次会话缺少 team_id 或 agent_id，无法保存默认。请执行 `mem:session-reset` 重走选择表单。",
+        t("ℹ️ 本次会话缺少 team_id 或 agent_id，无法保存默认。请执行 `mem:session-reset` 重走选择表单。", `ℹ️ This session is missing team_id or agent_id, so no default can be saved. Run \`mem:session-reset\` to go through the selection form again.`),
     };
   }
 
@@ -165,7 +166,7 @@ function formatTriple(
   sel: Pick<CurrentSelection, "teamId" | "teamName" | "agentId" | "agentName" | "taskId" | "taskName" | "isVirtualDefault">,
 ): string[] {
   const taskLabel = sel.isVirtualDefault
-    ? "default (不绑定任何 Task)"
+    ? t("default (不绑定任何 Task)", `default (no Task bound)`)
     : sel.taskName
       ? `${sel.taskName} (${sel.taskId})`
       : sel.taskId;
@@ -179,12 +180,12 @@ function formatTriple(
 /** 格式化成功文本 (落库后回显保存了什么，便于用户核对 / 撤销)。 */
 function formatSuccess(sel: CurrentSelection): string {
   return [
-    "✅ 当前 session 绑定默认配置：",
+    t("✅ 当前 session 绑定默认配置：", `✅ This session uses your default configuration:`),
     "",
     ...formatTriple(sel),
     "",
-    "下次新开 Session 将自动使用这组配置，无需再选择。",
-    "想解除请执行 `mem:config-unlock`；想换一组请去面板「Agents · Session 默认配置」或重跑 `mem:config-lock`。",
+    t("下次新开 Session 将自动使用这组配置，无需再选择。", `New sessions will use this configuration automatically, with no selection needed.`),
+    t("想解除请执行 `mem:config-unlock`；想换一组请去面板「Agents · Session 默认配置」或重跑 `mem:config-lock`。", `To clear it run \`mem:config-unlock\`; to choose another set, use the panel under Agents · Session defaults, or run \`mem:config-lock\` again.`),
   ].join("\n");
 }
 
@@ -198,24 +199,24 @@ function formatSuccess(sel: CurrentSelection): string {
  */
 function formatPendingPreview(draft: PendingConfigLockDraft): string {
   const lines: string[] = [
-    "⚠️ 即将保存为全局默认配置（**尚未保存**）：",
+    t("⚠️ 即将保存为全局默认配置（**尚未保存**）：", `⚠️ About to save as your global default configuration (**not saved yet**):`),
     "",
     ...formatTriple(draft),
   ];
 
   if (draft.previous) {
     lines.push("");
-    lines.push("**将被覆盖的当前默认配置：**");
+    lines.push(t("**将被覆盖的当前默认配置：**", `**Current default configuration that will be overwritten:**`));
     lines.push(`- Team: ${draft.previous.teamId}`);
     lines.push(`- Agent: ${draft.previous.agentId}`);
     lines.push(
-      `- Task: ${draft.previous.taskId === "default" ? "default (不绑定任何 Task)" : draft.previous.taskId}`,
+      `- Task: ${draft.previous.taskId === "default" ? t("default (不绑定任何 Task)", `default (no Task bound)`) : draft.previous.taskId}`,
     );
   }
 
   lines.push("");
-  lines.push("确认请回复 `mem:config-lock confirm`，取消请回复 `mem:config-lock cancel`。");
-  lines.push("（5 分钟内有效，超时后需重新执行 `mem:config-lock`。）");
+  lines.push(t("确认请回复 `mem:config-lock confirm`，取消请回复 `mem:config-lock cancel`。", `Reply \`mem:config-lock confirm\` to confirm, or \`mem:config-lock cancel\` to cancel.`));
+  lines.push(t("（5 分钟内有效，超时后需重新执行 `mem:config-lock`。）", `(Valid for 5 minutes; after that, run \`mem:config-lock\` again.)`));
   return lines.join("\n");
 }
 
@@ -257,11 +258,11 @@ async function applyLock(
   } catch (err) {
     const raw = err instanceof Error ? err.message : String(err);
     const text = [
-      "❌ 保存账户级默认失败，当前默认配置未改动。",
+      t("❌ 保存账户级默认失败，当前默认配置未改动。", `❌ Failed to save the account-level default; the current default is unchanged.`),
       "",
-      `原始错误: ${raw}`,
+      t(`原始错误: ${raw}`, `Raw error: \${raw}`),
       "",
-      "若是 `permission_denied` / `entity_not_found` / `task_inactive` 等，表示 Team/Agent/Task 的身份或归属校验未通过。请检查你是否仍属于该 Team，以及 Agent/Task 是否还在。",
+      t("若是 `permission_denied` / `entity_not_found` / `task_inactive` 等，表示 Team/Agent/Task 的身份或归属校验未通过。请检查你是否仍属于该 Team，以及 Agent/Task 是否还在。", `If it is \`permission_denied\` / \`entity_not_found\` / \`task_inactive\` etc., the Team/Agent/Task identity or ownership check failed. Check that you still belong to that Team and that the Agent/Task still exists.`),
     ].join("\n");
     console.warn(
       `[mem-command:config-lock] setUserSessionDefault failed for user=${ctx.userId} session=${ctx.sessionKey}: ${raw}`,
@@ -303,8 +304,8 @@ export async function executeConfigLock(ctx: MemCommandContext): Promise<MemComm
   if (sub === "cancel") {
     const had = clearPending(pendingKeyFor(ctx, sel));
     const text = had
-      ? "↩️ 已取消，未保存任何默认配置。当前默认配置保持不变。"
-      : "ℹ️ 没有待确认的默认配置（可能已确认或已超时），无需取消。";
+      ? t("↩️ 已取消，未保存任何默认配置。当前默认配置保持不变。", `↩️ Cancelled — no default was saved. The current default configuration is unchanged.`)
+      : t("ℹ️ 没有待确认的默认配置（可能已确认或已超时），无需取消。", `ℹ️ There is no pending default configuration (it may already be confirmed or expired); nothing to cancel.`);
     return result(ctx, requestId, true, text);
   }
 
@@ -316,8 +317,8 @@ export async function executeConfigLock(ctx: MemCommandContext): Promise<MemComm
     const pending = getPending(key);
     if (!pending || pending.kind !== "config-lock") {
       const text =
-        "ℹ️ 没有待确认的默认配置（可能已确认、已取消或已超过 5 分钟）。\n\n" +
-        "请重新执行 `mem:config-lock` 查看待保存内容后再确认。";
+        t("ℹ️ 没有待确认的默认配置（可能已确认、已取消或已超过 5 分钟）。\n\n", `ℹ️ There is no pending default configuration (it may already be confirmed, cancelled, or older than 5 minutes).\n\n`) +
+        t("请重新执行 `mem:config-lock` 查看待保存内容后再确认。", `Run \`mem:config-lock\` again to review what will be saved, then confirm.`);
       return result(ctx, requestId, false, text);
     }
     const d = pending.draft;

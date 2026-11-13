@@ -13,6 +13,7 @@
  */
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
+import { t } from "../../i18n/lang.js";
 import { buildMemResponse } from "../response-builder.js";
 import {
   cancelPendingTaskAction,
@@ -24,7 +25,7 @@ const DESC_PREVIEW_LEN = 200;
 
 function trimDesc(desc: string | undefined | null): string {
   const text = desc ?? "";
-  if (text.length === 0) return "(空)";
+  if (text.length === 0) return t("(空)", `(empty)`);
   return text.length > DESC_PREVIEW_LEN ? `${text.slice(0, DESC_PREVIEW_LEN)}...` : text;
 }
 
@@ -67,24 +68,24 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
 
     if (result.noPending) {
       return finalize(
-        `⚠️ 没有待确认的 Task 更新（可能已超时或被取消）。请重新执行 \`mem:update-task [补充]\`。`,
+        t(`⚠️ 没有待确认的 Task 更新（可能已超时或被取消）。请重新执行 \`mem:update-task [补充]\`。`, `⚠️ No pending Task update (it may have expired or been cancelled). Run \`mem:update-task [note]\` again.`),
         false,
         { reason: "no_pending" },
       );
     }
     if (!result.success) {
       return finalize(
-        `❌ Task 更新失败：${result.error ?? "unknown error"}`,
+        t(`❌ Task 更新失败：${result.error ?? "unknown error"}`, `❌ Task update failed: \${result.error ?? "unknown error"}`),
         false,
         { reason: "update_failed", detail: result.error },
       );
     }
 
     return finalize(
-      `✅ Task 已更新。\n\n` +
-        `- **标题**：${result.title}（不可变）\n` +
-        `- **状态**：${result.status ?? "running"}\n` +
-        `- **新描述**：${trimDesc(result.description)}\n` +
+      t(`✅ Task 已更新。\n\n`, `✅ Task updated.\n\n`) +
+        t(`- **标题**：${result.title}（不可变）\n`, `- **Title**: \${result.title} (immutable)\n`) +
+        t(`- **状态**：${result.status ?? "running"}\n`, `- **Status**: \${result.status ?? "running"}\n`) +
+        t(`- **新描述**：${trimDesc(result.description)}\n`, `- **New description**: \${trimDesc(result.description)}\n`) +
         `- **Task ID**：\`${result.taskId}\``,
       true,
       {
@@ -106,14 +107,14 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
     });
     if (!result.success) {
       return finalize(
-        `⚠️ 取消失败：${result.error ?? "unknown"}`,
+        t(`⚠️ 取消失败：${result.error ?? "unknown"}`, `⚠️ Cancel failed: \${result.error ?? "unknown"}`),
         false,
         { reason: "cancel_failed", detail: result.error },
       );
     }
     const msg = result.cancelled
-      ? `✅ 已取消待确认的 Task 更新。`
-      : `ℹ️ 当前没有待确认的 Task 更新。`;
+      ? t(`✅ 已取消待确认的 Task 更新。`, `✅ Cancelled the pending Task update.`)
+      : t(`ℹ️ 当前没有待确认的 Task 更新。`, `ℹ️ There is no pending Task update.`);
     return finalize(msg, true, { cancelled: result.cancelled ?? false });
   }
 
@@ -123,8 +124,8 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
 
   if (!directDescription && recentMessages.length === 0) {
     return finalize(
-      `⚠️ 当前请求未携带对话消息，无参数版 \`mem:update-task\` 需要最近对话作为上下文。` +
-        `\n\n你可以直接：\`mem:update-task <你的补充描述>\` 手动指定新描述。`,
+      t(`⚠️ 当前请求未携带对话消息，无参数版 \`mem:update-task\` 需要最近对话作为上下文。`, `⚠️ This request carries no conversation messages; the no-argument form of \`mem:update-task\` needs recent conversation as context.`) +
+        t(`\n\n你可以直接：\`mem:update-task <你的补充描述>\` 手动指定新描述。`, `\n\nYou can instead run \`mem:update-task <your note>\` to set the new description yourself.`),
       false,
       { reason: "no_recent_messages" },
     );
@@ -149,7 +150,7 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
   // 未绑
   if (!result.success && result.error?.includes("no task bound")) {
     return finalize(
-      `⚠️ 当前 session 尚未绑定 Task。请先执行 \`mem:create-task\` 创建一个 Task 再来更新。`,
+      t(`⚠️ 当前 session 尚未绑定 Task。请先执行 \`mem:create-task\` 创建一个 Task 再来更新。`, `⚠️ This session has no Task bound. Run \`mem:create-task\` to create one before updating.`),
       false,
       { reason: "no_task_bound" },
     );
@@ -158,8 +159,8 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
   // 跨用户更新：kernel 不支持，proxy 侧提前拒绝并建议新建
   if (!result.success && result.error === "not_creator") {
     return finalize(
-      `❌ 无法更新：该 Task 不是你创建的，当前不支持跨用户修改。\n\n` +
-        `如果你需要基于当前会话新建一个属于你的 Task，请使用 \`mem:create-task\`。`,
+      t(`❌ 无法更新：该 Task 不是你创建的，当前不支持跨用户修改。\n\n`, `❌ Cannot update: this Task was not created by you, and cross-user edits are not supported.\n\n`) +
+        t(`如果你需要基于当前会话新建一个属于你的 Task，请使用 \`mem:create-task\`。`, `If you need a Task of your own based on this conversation, use \`mem:create-task\`.`),
       false,
       { reason: "not_creator" },
     );
@@ -170,9 +171,9 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
     const detail = result.error ?? "unknown error";
     const hintLine = directDescription
       ? ""
-      : "\n\n你可以：\n1. 稍后重试\n2. `mem:update-task <你的补充>` 手动指定新描述";
+      : t("\n\n你可以：\n1. 稍后重试\n2. `mem:update-task <你的补充>` 手动指定新描述", `\n\nYou can:\n1. Retry later\n2. \`mem:update-task <your note>\` to set the new description yourself`);
     return finalize(
-      `❌ Task 更新失败：${detail}${hintLine}`,
+      t(`❌ Task 更新失败：${detail}${hintLine}`, `❌ Task update failed: \${detail}\${hintLine}`),
       false,
       { reason: "update_failed", detail },
     );
@@ -181,9 +182,9 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
   // LLM 判无需更新
   if (result.noUpdateNeeded) {
     return finalize(
-      `ℹ️ Task 无需更新 —— 最近对话未产生新的进展或范围变化。\n\n` +
+      t(`ℹ️ Task 无需更新 —— 最近对话未产生新的进展或范围变化。\n\n`, `ℹ️ No update needed — the recent conversation brought no new progress or scope change.\n\n`) +
         `Task ID: \`${result.taskId}\`\n` +
-        `可稍后再次执行 \`mem:update-task [补充]\` 触发判断，或直接带参数强制更新。`,
+        t(`可稍后再次执行 \`mem:update-task [补充]\` 触发判断，或直接带参数强制更新。`, `Run \`mem:update-task [note]\` again later to re-evaluate, or pass an argument to force an update.`),
       true,
       { reason: "no_update_needed", task_id: result.taskId },
     );
@@ -193,12 +194,12 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
   if (result.pending && result.pending.kind === "update") {
     const p = result.pending;
     const statusLine = p.statusSuggestion
-      ? `\n- 状态建议：${p.statusSuggestion}`
+      ? t(`\n- 状态建议：${p.statusSuggestion}`, `\n- Suggested status: \${p.statusSuggestion}`)
       : "";
     return finalize(
-      `📝 Task「${p.currentTitle ?? p.taskId}」更新预览：\n\n` +
-        `- 新描述：${trimDesc(p.draftDescription)}${statusLine}\n\n` +
-        `回复 \`mem:update-task confirm\` 确认，或 \`mem:update-task cancel\` 取消。`,
+      t(`📝 Task「${p.currentTitle ?? p.taskId}」更新预览：\n\n`, `📝 Update preview for Task "\${p.currentTitle ?? p.taskId}":\n\n`) +
+        t(`- 新描述：${trimDesc(p.draftDescription)}${statusLine}\n\n`, `- New description: \${trimDesc(p.draftDescription)}\${statusLine}\n\n`) +
+        t(`回复 \`mem:update-task confirm\` 确认，或 \`mem:update-task cancel\` 取消。`, `Reply \`mem:update-task confirm\` to confirm, or \`mem:update-task cancel\` to cancel.`),
       true,
       {
         reason: "pending",
@@ -216,7 +217,7 @@ export async function executeUpdateTask(ctx: MemCommandContext): Promise<MemComm
 
   // 兜底（理论走不到）：返回当前状态
   return finalize(
-    `ℹ️ Task 无变更。\n\nTask ID: \`${result.taskId}\``,
+    t(`ℹ️ Task 无变更。\n\nTask ID: \`${result.taskId}\``, `ℹ️ No change to the Task.\n\nTask ID: \`\${result.taskId}\``),
     true,
     { task_id: result.taskId },
   );

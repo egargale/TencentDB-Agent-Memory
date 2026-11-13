@@ -8,6 +8,7 @@
 import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
 import { forceArchiveSkill } from "../../routes/session-force-archive.js";
+import { t } from "../../i18n/lang.js";
 
 export async function executeCreateSkill(ctx: MemCommandContext): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
@@ -23,11 +24,11 @@ export async function executeCreateSkill(ctx: MemCommandContext): Promise<MemCom
   let messageText: string;
 
   if (!result.success) {
-    messageText = `❌ 本次对话归档失败：${result.error ?? "未知错误"}`;
+    messageText = t(`❌ 本次对话归档失败：${result.error ?? "未知错误"}`, `❌ Failed to archive this conversation: ${result.error ?? "unknown error"}`);
   } else if (result.status === "empty") {
-    messageText = `⚠️ 本次对话暂无可归档内容，请继续对话后再试`;
+    messageText = t("⚠️ 本次对话暂无可归档内容，请继续对话后再试", "⚠️ There is nothing to archive in this conversation yet — keep talking and try again");
   } else {
-    messageText = `✅ 本次对话已归档成功，Skill 提取中`;
+    messageText = t("✅ 本次对话已归档成功，Skill 提取中", "✅ Conversation archived, skill extraction in progress");
   }
 
   const response = buildMemResponse(messageText, {

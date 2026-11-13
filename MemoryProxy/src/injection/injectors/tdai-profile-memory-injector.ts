@@ -2,9 +2,11 @@ import type { AgentContext, AnchorTarget, CacheStrategy, ContextBlock, Injection
 import { HOOK_PRIORITY } from "../types.js";
 import { TdaiClient } from "../../tdai/client.js";
 import type { TdaiMemoryConfig } from "../../tdai/types.js";
-import { getTdaiIdentity } from "../../tdai/identity.js";
+import { isEn, t } from "../../i18n/lang.js";
+import { MEMORY_TOOLS_GUIDE_EN, PROFILE_HEADER_EN } from "./i18n/tdai-profile-memory.en.js";
 import type { CoreSkillConfig } from "../../types.js";
 import { getMetadataClient } from "../../meta/client.js";
+import { getTdaiIdentity } from "../../tdai/identity.js";
 import { resolveFixedAssetCtxs, type FixedAssetCtx } from "./tdai-fixed-asset.js";
 
 /**
@@ -84,14 +86,17 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
     if (!hasAnything) {
       return [{
         type: "text",
-        content: MEMORY_TOOLS_GUIDE,
+        content: isEn ? MEMORY_TOOLS_GUIDE_EN : MEMORY_TOOLS_GUIDE,
         metadata: { source: this.id, agentCount: 0, l3Count: 0, l2Count: 0, mode: "tools-only" },
       }];
     }
 
     const lines: string[] = [
       "<tdai_profile_memory>",
-      "以下是 TDAI 为当前 agent 维护的长期工作记忆（自有 + 借入分段；L2 仅给索引，按需用工具读全文）：",
+      t(
+        "以下是 TDAI 为当前 agent 维护的长期工作记忆（自有 + 借入分段；L2 仅给索引，按需用工具读全文）：",
+        PROFILE_HEADER_EN,
+      ),
     ];
 
     let l2TotalCount = 0;
@@ -125,7 +130,7 @@ export class TdaiProfileMemoryInjector implements InjectionHook {
     lines.push("</tdai_profile_memory>");
     // 紧跟一段 memory-tools-guide，告诉 LLM 三个工具的用法 + 调用上限
     lines.push("");
-    lines.push(MEMORY_TOOLS_GUIDE);
+    lines.push(isEn ? MEMORY_TOOLS_GUIDE_EN : MEMORY_TOOLS_GUIDE);
 
     return [
       {

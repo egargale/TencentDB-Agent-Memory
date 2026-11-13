@@ -25,6 +25,7 @@
 import type { TeamOption, AgentDetail, TaskDetail } from "./types.js";
 import type { PresetResolution } from "./preset.js";
 import type { MetadataClient } from "../meta/client.js";
+import { t } from "../i18n/lang.js";
 
 export interface ResolveUserSessionDefaultInput {
   userId: string | null;
@@ -89,11 +90,20 @@ export function describeUserDefaultFallback(
 ): string | null {
   switch (reason) {
     case "team_not_accessible":
-      return "你设置的默认 Team 已不可访问（可能已退出该团队或团队被删除），本次改为手动选择。";
+      return t(
+        "你设置的默认 Team 已不可访问（可能已退出该团队或团队被删除），本次改为手动选择。",
+        "Your default Team is no longer accessible (you may have left the team, or it was deleted) — choosing manually this time.",
+      );
     case "agent_not_accessible":
-      return "你设置的默认 Agent 已不可访问（可能已被停用或删除），本次改为手动选择。";
+      return t(
+        "你设置的默认 Agent 已不可访问（可能已被停用或删除），本次改为手动选择。",
+        "Your default Agent is no longer accessible (it may have been disabled or deleted) — choosing manually this time.",
+      );
     case "task_not_accessible":
-      return "你设置的默认 Task 已不可访问（可能已被删除或已结束），本次改为手动选择。";
+      return t(
+        "你设置的默认 Task 已不可访问（可能已被删除或已结束），本次改为手动选择。",
+        "Your default Task is no longer accessible (it may have been deleted or closed) — choosing manually this time.",
+      );
     case "get_failed":
     case "":
       return null;
@@ -244,23 +254,23 @@ export function buildDefaultBindingNoticeIfApplicable(
     ? teamId
       ? `${teamName} (${teamId})`
       : teamName
-    : teamId || "未知 Team";
+    : teamId || t("未知 Team", "unknown Team");
   const agentPart = agent?.name
     ? agent.id
       ? `${agent.name} (${agent.id})`
       : agent.name
-    : agent?.id || "未知 Agent";
+    : agent?.id || t("未知 Agent", "unknown Agent");
   // 虚拟 default: taskIdFromRegData === "default" (哨兵值), task 为 null, 没有 id
   // 可展示。此时显式说明"不绑定任何 Task", 对齐 `mem:config-lock` 回显
   // (config-lock.ts `formatTriple` 对虚拟 default 的渲染) 以及面板的展示文案。
   const taskPart = task?.name
     ? `${task.name} (${task.id})`
     : taskIdFromRegData === "default"
-      ? "default（不绑定任何 Task）"
+      ? t("default（不绑定任何 Task）", "default (no Task bound)")
       : (taskIdFromRegData || "default");
 
   return [
-    "✅ 当前 session 绑定默认配置：",
+    t("✅ 当前 session 绑定默认配置：", "✅ This session uses your default configuration:"),
     "",
     `- Team: ${teamPart}`,
     `- Agent: ${agentPart}`,

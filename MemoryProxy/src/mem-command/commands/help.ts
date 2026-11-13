@@ -4,6 +4,8 @@
 
 import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { buildMemResponse } from "../response-builder.js";
+import { isEn } from "../../i18n/lang.js";
+import { HELP_TEXT_EN } from "./i18n/help.en.js";
 
 const HELP_TEXT = `## 支持的 mem: 命令
 
@@ -113,12 +115,13 @@ mem:help
 > 标准格式为 \`mem:<command>\`，冒号后不加空格。命令名大小写不敏感。`;
 
 export function getHelpText(): string {
-  return HELP_TEXT;
+  return isEn ? HELP_TEXT_EN : HELP_TEXT;
 }
 
 export async function executeHelp(ctx: MemCommandContext): Promise<MemCommandResult> {
   const requestId = `mem-cmd-${Date.now()}`;
-  const response = buildMemResponse(HELP_TEXT, {
+  const helpText = getHelpText();
+  const response = buildMemResponse(helpText, {
     protocol: ctx.protocol,
     stream: ctx.stream,
     requestId,
@@ -126,7 +129,7 @@ export async function executeHelp(ctx: MemCommandContext): Promise<MemCommandRes
   });
   return {
     success: true,
-    messageText: HELP_TEXT,
+    messageText: helpText,
     response,
   };
 }

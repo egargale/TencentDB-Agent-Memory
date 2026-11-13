@@ -36,6 +36,7 @@ import {
   type ListingResult,
 } from "../../skill/core-client.js";
 import type { CoreSkillConfig } from "../../types.js";
+import { isEn } from "../../i18n/lang.js";
 
 const TAG = "[skill-injector]";
 
@@ -104,12 +105,23 @@ const SKILL_LISTING_FOOTER =
 export function wrapAvailableSkillsBlock(listing: string): string {
   return [
     SKILL_LISTING_HEADER,
-    "以下是你（当前 agent）自带的云端 skill 列表。这些 skill 存储在你的 agent 名下，",
-    "优先使用它们完成任务。如果你觉得自带的 skill 不够，可以用 skill_search 工具",
-    "在团队的 skill 库中检索更多（跨 agent 共享）。",
-    "",
-    "**重要：这些 skill 存储在云端，不能使用 read_file / tool_use 直接访问，\n必须用 Bash 执行 curl 调用上方 <skill_tools> 块中的 skill-bridge 工具。**",
-    "",
+    ...(isEn
+      ? [
+          "Below are the cloud skills your current agent owns. They are stored under your agent's name —",
+          "prefer them to get the task done. If your own skills are not enough, use the skill_search tool",
+          "to search the team's skill library for more (shared across agents).",
+          "",
+          "**Important: these skills live in the cloud and cannot be accessed with read_file / tool_use;\nyou must run curl from Bash against the skill-bridge tools in the `<skill_tools>` block above.**",
+          "",
+        ]
+      : [
+          "以下是你（当前 agent）自带的云端 skill 列表。这些 skill 存储在你的 agent 名下，",
+          "优先使用它们完成任务。如果你觉得自带的 skill 不够，可以用 skill_search 工具",
+          "在团队的 skill 库中检索更多（跨 agent 共享）。",
+          "",
+          "**重要：这些 skill 存储在云端，不能使用 read_file / tool_use 直接访问，\n必须用 Bash 执行 curl 调用上方 <skill_tools> 块中的 skill-bridge 工具。**",
+          "",
+        ]),
     listing,
     SKILL_LISTING_FOOTER,
   ].join("\n");

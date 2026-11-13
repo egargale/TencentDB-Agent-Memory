@@ -13,22 +13,23 @@
 
 import type { TeamOption } from "../types.js";
 import { computePagination, CC_MAX_OPTIONS as CC_MAX_OPTIONS_SHARED } from "./pagination.js";
+import { t } from "../../i18n/lang.js";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 export const TOOL_NAME = "AskUserQuestion";
 export const TOOLCALL_PREFIX = "toolu_cc_session_init_";
 
-export const TEAM_FORM_TITLE = "会话初始化 — 选择 Team";
-export const AGENT_TASK_FORM_TITLE = "会话初始化 — 选择 Agent 与任务";
-export const RETRY_FORM_TITLE = "未能识别选择，请重新选择";
+export const TEAM_FORM_TITLE = t("会话初始化 — 选择 Team", "Session init — select Team");
+export const AGENT_TASK_FORM_TITLE = t("会话初始化 — 选择 Agent 与任务", "Session init — select Agent and task");
+export const RETRY_FORM_TITLE = t("未能识别选择，请重新选择", "Selection not recognised — please choose again");
 
-export const SKIP_LABEL = "本次不关联（跳过注入，直接放行）";
-export const MORE_LABEL = "更多 →";
+export const SKIP_LABEL = t("本次不关联（跳过注入，直接放行）", "Skip this time (no injection, pass through)");
+export const MORE_LABEL = t("更多 →", "More →");
 
-export const ASSET_CONFIRM_YES = "是，关联团队资产";
-export const ASSET_CONFIRM_NO = "否，本次不关联";
-export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队资产";
+export const ASSET_CONFIRM_YES = t("是，关联团队资产", "Yes, attach team assets");
+export const ASSET_CONFIRM_NO = t("否，本次不关联", "No, skip this time");
+export const ASSET_CONFIRM_FORM_TITLE = t("会话初始化 — 是否关联团队资产", "Session init — attach team assets?");
 
 /**
  * 附在每步 question 文末的通用备注。
@@ -36,7 +37,10 @@ export const ASSET_CONFIRM_FORM_TITLE = "会话初始化 — 是否关联团队�
  * 不关联" 就走 SKIP_RE bypass；没识别到的自由文本会 unrecognized → 同样 bypass。
  * 文案与 workbuddy/codex/codebuddy/dsh 五端统一，避免多客户端表述漂移。
  */
-const SKIP_HINT = '（请选择最匹配的选项，当前暂不支持自定义输入。若选择跳过，本次 Session 将不注入团队资产）';
+const SKIP_HINT = t(
+  '（请选择最匹配的选项，当前暂不支持自定义输入。若选择跳过，本次 Session 将不注入团队资产）',
+  ' (Pick the closest option — free-form input is not supported here. If you skip, no team assets are injected for this session)',
+);
 
 // 分页布局统一走 pagination.ts；此处仅用其常量。
 const CC_MAX_OPTIONS = CC_MAX_OPTIONS_SHARED;
@@ -137,11 +141,11 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
   if (stage === "asset_confirm") {
     questions.push({
-      question: titlePrefix + "本次对话是否要关联团队资产？" + SKIP_HINT,
-      header: "关联资产",
+      question: titlePrefix + t("本次对话是否要关联团队资产？", "Attach team assets to this conversation?") + SKIP_HINT,
+      header: t("关联资产", "Team assets"),
       options: [
-        { label: ASSET_CONFIRM_YES, description: "选择 Team / Agent / Task，注入团队上下文" },
-        { label: ASSET_CONFIRM_NO, description: "本次不注入任何内容，直接放行" },
+        { label: ASSET_CONFIRM_YES, description: t("选择 Team / Agent / Task，注入团队上下文", "Choose Team / Agent / Task and inject team context") },
+        { label: ASSET_CONFIRM_NO, description: t("本次不注入任何内容，直接放行", "Inject nothing this time, pass through") },
       ],
       multiSelect: false,
     });
@@ -170,7 +174,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      teamOpts.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Team）` });
+      teamOpts.push({ label: MORE_LABEL, description: t(`查看下一批（还剩 ${remaining} 个 Team）`, `Show the next batch (${remaining} more Teams)`) });
     }
 
     if (teamOpts.length < 2) {
@@ -181,9 +185,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? t(`（第 ${pageIndex + 1}/${page.totalPages} 页）`, ` (page ${pageIndex + 1}/${page.totalPages})`) : "";
     questions.push({
-      question: titlePrefix + `请选择本次会话所属的 Team${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + t(`请选择本次会话所属的 Team${pageSuffix}：`, `Select the Team for this session${pageSuffix}:`) + SKIP_HINT,
       header: page.totalPages > 1 ? `Team ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Team",
       options: teamOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -211,7 +215,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
 
     if (!page.isLastPage) {
       const remaining = page.total - page.end;
-      combinedOptions.push({ label: MORE_LABEL, description: `查看下一批（还剩 ${remaining} 个 Agent）` });
+      combinedOptions.push({ label: MORE_LABEL, description: t(`查看下一批（还剩 ${remaining} 个 Agent）`, `Show the next batch (${remaining} more Agents)`) });
     }
     // 末页不再追加 SKIP：主动跳过只在 asset_confirm 提供；后续阶段"异常/未识别"
     // 由 init.ts 兜底 bypass。
@@ -225,9 +229,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const pageSuffix = page.totalPages > 1 ? `（第 ${pageIndex + 1}/${page.totalPages} 页）` : "";
+    const pageSuffix = page.totalPages > 1 ? t(`（第 ${pageIndex + 1}/${page.totalPages} 页）`, ` (page ${pageIndex + 1}/${page.totalPages})`) : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + t(`请选择「${team.team_name}」下要使用的 Agent${pageSuffix}：`, `Select the Agent to use under "${team.team_name}"${pageSuffix}:`) + SKIP_HINT,
       header: page.totalPages > 1 ? `Agent ${pageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Agent",
       options: combinedOptions.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
@@ -256,7 +260,7 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       const remaining = page.total - page.end;
       taskOpts.push({
         label: MORE_LABEL,
-        description: `查看下一批（还剩 ${remaining} 个任务）`,
+        description: t(`查看下一批（还剩 ${remaining} 个任务）`, `Show the next batch (${remaining} more tasks)`),
       });
     }
 
@@ -268,9 +272,9 @@ function buildAskUserQuestionArgs(data: FormData): { questions: CCAskQuestion[] 
       );
     }
 
-    const taskPageSuffix = page.totalPages > 1 ? `（第 ${taskPageIndex + 1}/${page.totalPages} 页）` : "";
+    const taskPageSuffix = page.totalPages > 1 ? t(`（第 ${taskPageIndex + 1}/${page.totalPages} 页）`, ` (page ${taskPageIndex + 1}/${page.totalPages})`) : "";
     questions.push({
-      question: titlePrefix + `请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：` + SKIP_HINT,
+      question: titlePrefix + t(`请选择「${team.team_name}」下要关联的任务${taskPageSuffix}：`, `Select the task to attach under "${team.team_name}"${taskPageSuffix}:`) + SKIP_HINT,
       header: page.totalPages > 1 ? `Task ${taskPageIndex + 1}/${page.totalPages}`.slice(0, 12) : "Task",
       options: taskOpts.slice(0, CC_MAX_OPTIONS),
       multiSelect: false,
