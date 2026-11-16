@@ -64,6 +64,28 @@ export function renderHeader(name: string, value: string): string {
   return "  -H " + shellQuote(`${name}: ${value}`) + " \\";
 }
 
+/**
+ * 渲染“资源 → 实际请求地址”清单。
+ *
+ * 注入块里的 curl 是字面量模板（`<url>` / `<知识id>`），agent 只有当资源表
+ * 告诉它真实地址时才能拼出可用请求。url 缺失的资源不渲染。
+ */
+export function renderUrlInstantiations(
+  resources: KnowledgeItem[],
+  urlsById: ReadonlyMap<string, string> | undefined,
+  heading: string,
+  line: (url: string, knowledgeId: string) => string,
+): string[] {
+  if (!urlsById) return [];
+  const lines = resources
+    .map((r) => {
+      const url = urlsById.get(r.knowledge_id)?.replace(/\/+$/, "");
+      return url ? line(url, r.knowledge_id) : null;
+    })
+    .filter((l): l is string => l !== null);
+  return lines.length > 0 ? [heading, ...lines, ""] : [];
+}
+
 function toCompositeSessionKey(sessionKey?: string, agentSource?: string): string | undefined {
   if (!sessionKey) return undefined;
   if (!agentSource) return sessionKey;
@@ -142,9 +164,11 @@ export function renderKnowledgeToolsBlock(
   resources: KnowledgeItem[],
   serviceId: string,
   telemetryContext: KnowledgeTelemetryContext = {},
+  /** knowledge_id → 资源基址（即块里 `<url>` 占位符的实际来源）。 */
+  urlsById?: ReadonlyMap<string, string>,
 ): string | null {
   if (!resources || resources.length === 0) return null;
-  if (isEn) return renderKnowledgeToolsBlockEn(resources, serviceId, telemetryContext);
+  if (isEn) return renderKnowledgeToolsBlockEn(resources, serviceId, telemetryContext, urlsById);
 
   const telemetryHeaders: Array<[string, string | undefined]> = [
     ["x-conversation-id", telemetryContext.sessionKey],
@@ -160,6 +184,12 @@ export function renderKnowledgeToolsBlock(
       .filter((entry): entry is [string, string] => Boolean(entry[1]))
       .map(([name, value]) => renderHeader(name, value)),
   ];
+
+  // 把上面的 `<url>` / `<知识id>` 占位符落成可直接粘的 curl（每个资源一条）。
+  // 缺 url 的资源跳过——宁少渲一条，不让 agent 拿占位符去猜。
+  const instantiations = renderUrlInstantiations(resources, urlsById, "## 各资源实际地址", (u, id) =>
+    `- ${id} → \`${u}/tools/list\`、\`${u}/tools/call\``,
+  );
 
   const resourceTags = resources
     .map((r) => {
@@ -207,7 +237,7 @@ export function renderKnowledgeToolsBlock(
     "## 已绑定资源",
     resourceTags,
     "",
-    "## 调用方式（服务级统一端点，URL 直接用资源的 url 拼接）",
+    "## 调用方式（服务级统一端点，URL 取资源的 url）",
     "目标资源由 body 里的 knowledge_id 指定；**不要**把 knowledge_id 拼进 URL 路径。",
     `**每次请求都必须带请求头** \`x-tdai-service-id: ${serviceId}\`（租户标识，缺失会被拒绝）。`,
     "",
@@ -226,6 +256,7 @@ export function renderKnowledgeToolsBlock(
     ...requestHeaderLines,
     "  -d '{\"knowledge_id\":\"<知识id>\", \"tool_name\":\"<Step1返回的name>\", \"params\":{...}}'",
     "",
+    ...instantiations,
     "返回: {code, message, data}；code=0 成功。",
     "",
     "## 约定",
@@ -358,7 +389,13 @@ export class KnowledgeToolsInjector implements InjectionHook {
       resources = filterResourcesByCapabilities(resources, assetCapabilities);
       // 注入 prompt 里给 LLM 用的 service-id 也要是 spaceId（LLM 拿它调 KS 的 tools/list|call）。
       const injectionServiceId = spaceId || this.config.coreSkill.serviceId;
-      const content = renderKnowledgeToolsBlock(resources, injectionServiceId, telemetryContext);
+      // `url` 是本 injector 从内核读到的资源基址，KS 的 /tools/* 挂在它下面。
+      // 同一 knowledge 的 url 相同；渲染时按 knowledge_id 逐个代入，否则 prompt
+      // 里只剩字面量 `<url>`，agent 无从得知该往哪发请求（2026-11-15）。
+      const urlsById = new Map(resources.map((r) => [r.knowledge_id, r.service_url]));
+      const content = renderKnowledgeToolsBlock(
+        resources, injectionServiceId, telemetryContext, urlsById,
+      );
       if (!content) return [];
       return [{
         type: "text",

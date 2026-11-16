@@ -8,6 +8,7 @@ import {
   attr,
   deriveRepoSlug,
   renderHeader,
+  renderUrlInstantiations,
   xmlAttrEscape,
   type KnowledgeTelemetryContext,
 } from "../knowledge-tools-injector.js";
@@ -17,6 +18,7 @@ export function renderKnowledgeToolsBlockEn(
   resources: KnowledgeItem[],
   serviceId: string,
   telemetryContext: KnowledgeTelemetryContext = {},
+  urlsById?: ReadonlyMap<string, string>,
 ): string | null {
   if (!resources || resources.length === 0) return null;
 
@@ -34,6 +36,11 @@ export function renderKnowledgeToolsBlockEn(
       .filter((entry): entry is [string, string] => Boolean(entry[1]))
       .map(([name, value]) => renderHeader(name, value)),
   ];
+
+  const instantiations = renderUrlInstantiations(
+    resources, urlsById, "## Actual endpoint per resource", (u, id) =>
+      `- ${id} → \`${u}/tools/list\`, \`${u}/tools/call\``,
+  );
 
   const resourceTags = resources
     .map((r) => {
@@ -94,6 +101,7 @@ export function renderKnowledgeToolsBlockEn(
     ...requestHeaderLines,
     "  -d '{\"knowledge_id\":\"<knowledge id>\", \"tool_name\":\"<name from Step 1>\", \"params\":{...}}'",
     "",
+    ...instantiations,
     "Returns: {code, message, data}; code=0 means success.",
     "",
     "## Conventions",

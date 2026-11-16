@@ -47,7 +47,12 @@ async function render(): Promise<Record<string, string>> {
     "tdai-memory-tools": renderTdaiMemoryToolsBlock(base, "sid-1", "space-1"),
     "memory-tools-guide": isEn ? MEMORY_TOOLS_GUIDE_EN : MEMORY_TOOLS_GUIDE,
     "skill-tools": renderSkillToolsBlock(base, true, "sid-1", "space-1"),
-    "knowledge-tools": renderKnowledgeToolsBlock(knowledge, "space-1", { sessionKey: "sid-1" }) ?? "",
+    // urlsById must be populated, otherwise the instantiations list is empty in
+    // BOTH locales and the token diff below cannot catch a broken join.
+    "knowledge-tools": renderKnowledgeToolsBlock(
+      knowledge, "space-1", { sessionKey: "sid-1" },
+      new Map(knowledge.map((k) => [k.knowledge_id, k.service_url])),
+    ) ?? "",
     "available-skills": wrapAvailableSkillsBlock("LISTING"),
     "asset-reflection": renderAssetReflectionBlock(["skill_tools", "tdai_memory_tools"]),
     "mem-help": getHelpText(),
@@ -66,6 +71,10 @@ async function render(): Promise<Record<string, string>> {
   );
   add(/name="([a-z_]+)"/g);
   add(/(x-[a-z-]+)/g);
+  // Endpoint instantiations (`## Actual endpoint per resource` / `## 各资源实际地址`):
+  // the heading is translated, so a mismatch would silently ship one locale's
+  // heading to the other. Keep the rendering exercised — see `knowledge` below.
+  add(/(tools\/list|tools\/call)/g);
   add(/((?:memory|skill)-bridge[^\s'"`\\]*)/g);
   add(/\bpath: (\S+)/g);
   add(/\b([45]\d{4})\b/g);
