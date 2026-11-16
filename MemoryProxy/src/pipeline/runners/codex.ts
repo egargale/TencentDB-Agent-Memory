@@ -533,7 +533,7 @@ export async function runCodexPipeline(
     const userText = codexAdapter.extractUserText(input) ?? "";
     const _resetResp = await stageSessionResetPreHook({
       c, config, body: body as Record<string, unknown>, agentSource, sessionKey, spaceId, userId,
-      isAuxiliary: false, dshHeadless: false, isStream,
+      isAuxiliary: false, noFormClient: false, isStream,
       protocol: "responses", userText, enabled: teamMemoryEnabled,
     });
     if (_resetResp) return _resetResp;

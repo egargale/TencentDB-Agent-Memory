@@ -5,7 +5,13 @@
  * session `f817ea40163c4dd89ee4f5a18bba9717`）：
  *
  *   - 协议：**OpenAI** (`/codebuddy/{spaceId}/v1/chat/completions`)，永远 stream
- *   - `message.content` **全是字符串**（3P LLM 常见形态），从不用 content-block 数组
+ *   - `message.content` 早期版本全是字符串；新版 CLI（2026-11-15 实测，
+ *     session `01a1def2-…`）已改成 **text-block 数组**（Anthropic 形态，
+ *     proxy log `role=user content=array[text]`）。数组直接走 default 兜底
+ *     会把 `<system-reminder>` 等 wrapper 拼进头部，导致 mem-command parser
+ *     的 `startsWith("mem:")` 判定失败 → 命令被透传给上游 LLM（P1：CodeBuddy
+ *     下所有 mem: 命令失效）。修复：数组先拼 text block，再过一遍
+ *     `extractUserQueryText`，与字符串路径同语义。
  *   - 字符串里塞了 CB pseudo-XML wrapper：
  *       * `<user_info>`         首条 user，OS/shell/workspace 元信息
  *       * `<additional_data>`   每条 user，current_time 等辅助段
@@ -42,10 +48,14 @@ export const codebuddyAdapter: AgentAdapter = {
   },
 
   extractUserText(content) {
-    // CB content 从来都是字符串。若未来 CB 突然改成数组，走 default 兜底
-    // （拼接所有 text block）不主动崩。
+    // 新版 CB CLI 用 text-block 数组（Anthropic 形态）：先拼接所有 text block，
+    // 再走与字符串路径相同的 extractUserQueryText，保证 <user_query> 锚点/
+    // wrapper 剥离语义一致。拼接结果为空或未知结构时仍回落 default 不崩。
     if (typeof content !== "string") {
-      return defaultAdapter.extractUserText(content);
+      const joined = defaultAdapter.extractUserText(content);
+      if (joined === null || joined.length === 0) return null;
+      const extracted = extractUserQueryText(joined);
+      return extracted.length > 0 ? extracted : null;
     }
     const extracted = extractUserQueryText(content);
     return extracted.length > 0 ? extracted : null;

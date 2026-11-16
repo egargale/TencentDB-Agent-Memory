@@ -28,6 +28,11 @@ import type { TeamOption } from "./types.js";
  * on preset failure/mismatch — the client renders unknown tool_use as an
  * error. See `session/codebuddy/init.ts` header-preselect branch and the
  * `mem:session-reset` pre-hooks in `handler.ts` / `anthropicHandler.ts`.
+ *
+ * NOTE: CodeBuddy **CLI** has the same constraint but cannot be keyed by
+ * agentSource — `codebuddy` also covers the IDE plugin, which does render the
+ * form. It is therefore detected per request (`reqCtx.formToolMissing`) and
+ * merged into the same branch inside `handleSessionInit`.
  */
 export const HEADER_ONLY_AGENTS: ReadonlySet<string> = new Set([
   "hermes",

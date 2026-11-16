@@ -1372,7 +1372,7 @@ export async function runWorkbuddyPipeline(
     const userText = workbuddyAdapter.extractUserText(input) ?? "";
     const _resetResp = await stageSessionResetPreHook({
       c, config, body: body as Record<string, unknown>, agentSource, sessionKey, spaceId, userId,
-      isAuxiliary: false, dshHeadless: false, isStream,
+      isAuxiliary: false, noFormClient: false, isStream,
       protocol: "responses", userText, enabled: teamMemoryEnabled,
       compositeKeyOverride: `codex:${sessionKey}`,
     });

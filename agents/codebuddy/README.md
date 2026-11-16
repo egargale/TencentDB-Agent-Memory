@@ -87,14 +87,93 @@ asset_confirm → team_select → agent_task_select → initialized
 CB 的 `ask_followup_question` 选项列表 **无数量限制**，无需分页。  
 所有选项一次性全部展示。
 
-### 3.4 Plan Mode / Default Mode
+### 3.4 Form 能力（IDE 插件 vs CLI）
 
-CB **不存在** Default Mode gate。CB 客户端始终有 `ask_followup_question` tool 可用，form 始终可发。
+**CB IDE 插件**注册了 `ask_followup_question`，proxy 弹 form 即可完成选择。
+
+**CB CLI 没有这个工具**（只有 `AskUserQuestion`），proxy 发的 form tool_call 会被
+客户端回 `unsupported call: ask_followup_question`；proxy 匹配不到选项 → 连续
+`maxRetries` → `bypassed=true`，团队资产与记忆**静默丢失**，且日志里只有
+`asset-confirm max retries, abandoning`。
+
+proxy 的判定（每次请求实时算，`pipeline/runners/openai-chat.ts`）：
+`agentSource=codebuddy` 且 `body.tools[]` 非空且不含 `ask_followup_question`
+→ 该请求视为**无 form UI**：
+
+- 不走 `asset_confirm` / `team_select` / `agent_task` 任何表单
+- 身份**只来自请求头预选**：`x-team-id` + `x-agent-id`（+ 可选 `x-task-id`）
+- header 齐全且能对上是本人可见的 team/agent → 直接注册、注入资产
+- header 缺失 / 对不上 → `bypassed`（不注入），后续请求头修好后自动重试注册
+
+**可见性口径**：无 form 车道拉取的是 team **全量 active agent**，按
+`owner == 自己 || visibility == team` 过滤（与 `session/user-default.ts` 一致）。
+因此 CLI 的 `x-agent-id` 可以指向 team 内他人 owner 的公开 agent。
+有 form 的 IDE 插件路径仍只展示自己 owner 的 agent（保持表单行为不变）。
+
+> ⚠️ 若日志出现 `preset-partial (team resolved but agent missing/invalid)`：
+> `x-team-id` 已命中，但 `x-agent-id` 不在该 team 的可见列表里 —— 多半是
+> id 与 team 不匹配，或该 agent 是他人 owner 且 `visibility` 不是 `team`。
+> 注意：bypass 会持久化在会话状态里，修好 header 后需**新开会话**
+> （或在该会话执行 `mem:session-reset`）才会重新校验。
+
+`body.tools` 为空或缺失（纯对话 / aux 请求）时不判定，保持既有行为。
+
+> **CLI 用法**：给 CodeBuddy CLI 配 `CODEBUDDY_CUSTOM_HEADERS`（或在 settings.json
+> 的 `env` 块里，键名须以 `CODEBUDDY_` 开头）携带
+> `x-team-id` / `x-agent-id` / `x-task-id`（默认值，见 `config.example.yaml`
+> `sessionInit.headerAutoSelect`；改了配置项 `teamHeader` / `agentHeader` /
+> `taskHeader` 就按改后的名字发），
+> 并确认 `sessionInit.headerAutoSelect.enabled: true`（默认开启）。
+> 单独带 `x-task-id` 而不带 agent 仍会 bypass —— team 与 agent 是必填维度，
+> task 是可选维度（只带 team 时没有 agent 表单可弹）。
+
+### 3.4.1 CodeBuddy CLI（自定义 header）
+
+**必须用换行分隔多个 header。逗号分隔会静默失效** —— CLI 把整串当成第一个
+header 的值，后续 header 全部丢失：
+
+```
+# 错误 ❌
+CODEBUDDY_CUSTOM_HEADERS="x-team-id: team-xxx,x-agent-id: agt-yyy"
+→ proxy 收到 x-team-id = "team-xxx,x-agent-id: agt-yyy"
+→ 未知 team → preset-mismatch → 静默 bypass（命令照常回答，但无记忆注入）
+
+# 正确 ✅
+CODEBUDDY_CUSTOM_HEADERS=$'x-team-id: team-xxx\nx-agent-id: agt-yyy'
+```
+
+shell / settings.json 两种写法（均已实测）：
+
+```bash
+# ~/.bashrc（换行用 $'...' 展开）
+export CB_HDR_CODING=$'x-team-id: team-xxx\nx-agent-id: agt-yyy'
+alias buddy_coding='CODEBUDDY_CUSTOM_HEADERS="$CB_HDR_CODING" codebuddy'
+```
+
+```jsonc
+// settings.json —— JSON 字符串里用 \n 转义
+{
+  "env": {
+    "CODEBUDDY_CUSTOM_HEADERS": "x-team-id: team-xxx\nx-agent-id: agt-yyy"
+  }
+}
+```
+
+`task_id` 语义：缺失或内核里不存在（如 `no-task`）不会阻断注册，只是回收范围
+放宽到该 agent 的全部记忆；只有未知 team / 未知 agent 才算身份不匹配。
+
+> **自检**：`deploy/global-images/smoke-codebuddy.sh [buddy_别名]` 会校验
+> 别名/变量是否齐备、header 是否**逗号误用**、CLI 与 proxy 模型是否可用，
+> 并跑一次真实请求断言 proxy 日志里走到 `formToolMissing … preset hit →
+> register directly`（而非静默 bypass）。
 
 ### 3.5 跳过 Session Init
 
 - 在 `asset_confirm` 步骤选择 "否" → 跳过所有后续步骤，直接透传
-- 在任何步骤输入 "跳过" / "skip" → SKIP_RE 匹配后跳过
+- 自由文本 `跳过` / `skip` **不会**触发跳过：`SKIP_RE` 已于 2026-09-21 删除
+  （客户端会回放问题原文，正则误命中导致整个 session 被误 bypass）。
+  现在只识别 form 里"否"这个精确选项；答非所问时由 `maxRetries` 兜底 bypass。
+- CLI（无 form UI，见 §3.4）：不带 header 或 header 不匹配即 bypass。
 
 ---
 
@@ -112,7 +191,11 @@ CB **没有** fork / sidequery / compact 等辅助请求概念。每条请求都
 
 ## 5. 用户文本提取
 
-CB 消息体 `message.content` 始终是 **纯字符串**（不是 content block 数组）。
+CB 消息体 `message.content`：
+- **IDE 插件**：纯字符串（不是 content block 数组）
+- **CLI（≥ 2026-11）**：text-block 数组（Anthropic 形态），proxy 先拼 text block
+  再走同一套提取逻辑（`agent-adapters/codebuddy.ts`）
+
 
 提取逻辑：
 1. 在字符串中查找 `<user_query>...</user_query>` XML 包裹
@@ -167,6 +250,10 @@ PROXY_PORT=8096
 FORWARD_URL=https://api.openai.com   # CB OpenAI 上游
 # 或 FORWARD_URL=https://api.anthropic.com  # CB Anthropic 上游
 ```
+
+身份预选用的 header 名不在这里，在 `sessionInit.headerAutoSelect`
+（`teamHeader` / `agentHeader` / `taskHeader`，默认 `x-team-id` / `x-agent-id` /
+`x-task-id`，见 `config.example.yaml`）。
 
 实际上游由 `resolveForwardTarget` 动态决定（tokenhub / 直连 provider）。
 

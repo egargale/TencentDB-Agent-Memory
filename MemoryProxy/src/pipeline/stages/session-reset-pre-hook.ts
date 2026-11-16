@@ -31,10 +31,23 @@ export interface SessionResetPreHookInput {
   spaceId: string;
   userId: string;
   isAuxiliary: boolean;
-  dshHeadless: boolean;
+  /**
+   * 客户端 body.tools[] 里**没有**可以渲染 proxy 表单的 ask 工具（CB CLI / dsh headless
+   * 都是这个形态）：任何 form tool_call 都会被回 “unsupported call”。
+   *
+   * 无 form 客户端的身份只能来自请求头预选，因此 `mem:session-reset` 没有可回退的
+   * 交互入口 —— stage 必须走“不支持”分支，而不是重置 store 后让 header preselect
+   * 重新绑回原三元组（那会让 reset 静默无效）。
+   */
+  noFormClient?: boolean;
+  /**
+   * 旧字段名，等价于 `noFormClient`；保留给既有 caller（dsh headless 硬编码传
+   * `dshHeadless`）。新 caller 请用 `noFormClient`。
+   */
+  dshHeadless?: boolean;
   /** true = 允许 pre-hook 触发; anthropic 用 memoryTurn (requestKind=main && !legacyProxy),
-   *  其他 protocol 用 !isAuxiliary && !dshHeadless。
-   *  未提供时 stage 自己按 !isAuxiliary && !dshHeadless 计算。 */
+   *  其他 protocol 用 !isAuxiliary && !noForm。
+   *  未提供时 stage 自己按 !isAuxiliary && !noForm 计算。 */
   enabled?: boolean;
   isStream: boolean;
   protocol: SessionResetProtocol;
@@ -60,26 +73,31 @@ export async function stageSessionResetPreHook(
   input: SessionResetPreHookInput,
 ): Promise<Response | null> {
   const { c, config, body, agentSource, sessionKey, spaceId, userId,
-    isAuxiliary, dshHeadless, isStream, protocol, userText, thinking } = input;
-  const gate = input.enabled ?? (!isAuxiliary && !dshHeadless);
+    isAuxiliary, isStream, protocol, userText, thinking } = input;
+  // dsh 的 headless 与 CB CLI 的 form 缺失是同一个事实（客户端没有可渲染的 form
+  // tool）—— 两个入参别名合并，下面的分支无需再区分来源。
+  const noForm = input.noFormClient === true || input.dshHeadless === true;
+  // gate 只排除 aux 请求。无 form 客户端 **必须**进入下面分支才能拿到
+  // “不支持”响应；旧写法 `!isAuxiliary && !dshHeadless` 会在 no-form 时直接
+  // return null，于是 dsh headless 分支（连同今天的 CB CLI）永远不会命中，
+  // 命令落到主 reset 流程 → 重置后被 header preselect 重绑 → 静默无效。
+  const gate = input.enabled ?? !isAuxiliary;
   if (!gate) return null;
 
-  // header-only agent + dsh headless: 走"不支持"分支 (openai-chat/anthropic only,
+  // 无 form 客户端: 走“不支持”分支 (openai-chat/anthropic only,
   // codex/wb 不会用 header-only 客户端故这一段无害地不触发)
   const { isHeaderOnlyAgent } = await import("../../session/preset.js");
-  const noFormAgent = isHeaderOnlyAgent(agentSource) || dshHeadless;
+  const noFormAgent = isHeaderOnlyAgent(agentSource) || noForm;
   if (!isAuxiliary && noFormAgent) {
     const { isSessionResetCommand } = await import("../../mem-command/pre-intercept.js");
     if (isSessionResetCommand(body, agentSource)) {
       const { buildMemResponse } = await import("../../mem-command/response-builder.js");
-      console.log(`[mem-command:pre] session-reset unsupported for agent=${agentSource} dshHeadless=${dshHeadless}`);
-      const msg = isHeaderOnlyAgent(agentSource)
-        ? `⚠️ mem:session-reset 不支持 ${agentSource} 客户端。\n\n`
-          + `${agentSource} 通过 x-team-id / x-agent-id / x-task-id 请求头预选身份，没有交互式表单入口。\n`
-          + `请在客户端配置中直接更改这些请求头来切换 Team / Agent / Task。`
-        : "⚠️ mem:session-reset 不支持 dsh headless 模式。\n\n"
-          + "dsh 客户端在 headless / no-preset 场景下不挂 ask_user_question tool，无法弹出资产选择表单。\n"
-          + "请在带 ask_user_question preset 的 dsh 环境下使用。";
+      console.log(`[mem-command:pre] session-reset unsupported for agent=${agentSource} noForm=${noForm}`);
+      // 无 form 车道: 身份全靠请求头，换个身份 = 改请求头重开会话。单纯重置
+      // store 会被 header preselect 立即重绑回原三元组，用户看到的是命令无反应。
+      const msg = `⚠️ mem:session-reset 不支持 ${agentSource} 客户端。\n\n`
+        + `${agentSource} 通过 x-team-id / x-agent-id / x-task-id 请求头预选身份，没有交互式表单入口。\n`
+        + `请在客户端配置中更改这些请求头（并新开会话）来切换 Team / Agent / Task。`;
       return buildMemResponse(msg, {
         protocol,
         stream: isStream,
@@ -90,7 +108,7 @@ export async function stageSessionResetPreHook(
   }
 
   // 主 reset 流程 (所有 4 protocol 共用)
-  if (isAuxiliary || dshHeadless || isHeaderOnlyAgent(agentSource)) return null;
+  if (isAuxiliary || noForm || isHeaderOnlyAgent(agentSource)) return null;
 
   const { isSessionResetCommand } = await import("../../mem-command/pre-intercept.js");
   if (!isSessionResetCommand(body, agentSource)) return null;

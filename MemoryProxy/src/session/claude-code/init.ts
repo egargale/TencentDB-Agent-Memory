@@ -818,7 +818,11 @@ async function handleSessionInitInner(
     });
     const userDefaultResolution = userDefaultResult.resolution;
     const userDefaultFallbackReason = userDefaultResult.fallbackReason;
-    if (userDefaultResolution && userDefaultResolution.canRegister) {
+    // ⚠️ resetFlow gate (2026-11-15, 同 codebuddy/init.ts): mem:session-reset 的
+    // pre-hook 已把 state 置 uninitialized + resetFlow=true。若账户默认在本轮
+    // 直接 fast-register 回原三元组，reset 自我取消 → 表单永远不弹。reset 语义
+    // 是"重新选"，auto-register gate 必须让位给表单。
+    if (!state?.resetFlow && userDefaultResolution && userDefaultResolution.canRegister) {
       // ⚠️ 同 codebuddy/init.ts: cachedTeams[].agents 只含 owner=self, 而账户默认
       // 允许选 team 可见的别人 owner 的 agent —— 把命中 agent 补进对应 team, 否则
       // 下游 findTeamIdForAgent 匹配不到 → bypass (有默认配置却仍弹表单)。
@@ -862,7 +866,8 @@ async function handleSessionInitInner(
       describeUserDefaultFallback(userDefaultFallbackReason) ?? undefined;
 
     // ── Header-driven pre-selection: skip forms when identity is provided ──
-    if (presetIdentity && config.headerAutoSelect?.enabled) {
+    // ⚠️ 同上方 user-default gate: resetFlow (mem:session-reset) 时让位给表单。
+    if (!state?.resetFlow && presetIdentity && config.headerAutoSelect?.enabled) {
       const pr = resolvePresetIdentity(teams, presetIdentity);
 
       if (pr.hadMismatch) {

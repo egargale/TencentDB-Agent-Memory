@@ -22,7 +22,7 @@ import { DEFAULT_TASK_LABEL } from "../types.js";
 import { SessionStore } from "../store.js";
 import { buildSessionInfo } from "../registrar.js";
 import { injectSessionContextWithToggles } from "../context-injector.js";
-import type { MetadataClient } from "../../meta/client.js";
+import type { AgentEntity, MetadataClient } from "../../meta/client.js";
 import { isHeaderOnlyAgent, resolvePresetIdentity, type PresetIdentity } from "../preset.js";
 import {
   resolveUserSessionDefault,
@@ -93,6 +93,20 @@ export interface SessionRequestContext {
    * 未设置时默认 true（向新版对齐）。
    */
   questionsAsArray?: boolean;
+  /**
+   * 客户端 body.tools[] 里**没有** `ask_followup_question`。
+   *
+   * 典型场景：CodeBuddy **CLI**（只有 `AskUserQuestion`，没有 IDE 插件的
+   * `ask_followup_question`）。proxy 在此形态下发的 form tool_call 会被客户端
+   * 回 "unsupported call: ..." → 选项永远解析不到 → maxRetries 后静默 bypass
+   * （2026-11-15 tdai-proxy 日志实证）。
+   *
+   * 置 true 后状态机不再弹任何 form：身份只能来自请求头预选
+   * （`x-team-id` / `x-agent-id` / `x-task-id`），缺失或无效即 bypass
+   * —— 与 pi/hermes/openclaw 的 header-only 语义一致，只是判定按请求实时做，
+   * 因为同一个 `agentSource=codebuddy` 的 IDE 插件是有 form 能力的。
+   */
+  formToolMissing?: boolean;
 }
 
 export interface SessionInitResult {
@@ -311,6 +325,7 @@ async function fetchTeamsAndAgents(
   userId: string,
   config: SessionInitConfig,
   metadataClient: MetadataClient,
+  teamWideAgents = false,
 ): Promise<{ teams: TeamOption[] }> {
   const teamsRaw = await metadataClient.listTeams(userId);
   const teams: TeamOption[] = [];
@@ -321,9 +336,31 @@ async function fetchTeamsAndAgents(
       const [agentsRaw, tasksRaw] = await Promise.all([
         // Agents are scoped to (team, owner) — each user only sees the agents
         // they created within the team. Tasks remain team-wide (unchanged).
-        metadataClient.listAgents(t.team_id, userId),
+        //
+        // ⚠️ owner 限定只对**能弹表单**的客户端成立（表单里展示的也就是这些）。
+        // 无 form 车道的客户端（CB CLI / pi / hermes / openclaw）身份完全来自
+        // 请求头，header 里指向的可以是 team 内 owner 不是自己的 `visibility=team`
+        // agent —— 只用 owner=self 列表校验会判成 preset-partial（team 对上、
+        // agent 对不上）→ 静默 bypass。实测：CLI 带上他人 owner 的 agent 时
+        // 每次新会话都 "preset-partial → bypass"（2026-11-15）。
+        // 因此 formToolMissing 时改拉 team 全量 active agent，与
+        // user-default.ts 的可见性口径（owner==self || visibility==team）对齐；
+        // 有 form 的 IDE 插件路径保持 owner=self 不变（零回归）。
+        teamWideAgents
+          ? metadataClient.listAgents(t.team_id)
+          : metadataClient.listAgents(t.team_id, userId),
         metadataClient.listTasks(t.team_id),
       ]);
+      const visibleAgents = teamWideAgents
+        ? (agentsRaw as AgentEntity[]).filter(
+            (a) => a.owner_user_id === userId || a.visibility === "team",
+          )
+        : (agentsRaw as AgentEntity[]);
+      const agents = visibleAgents.map((a) => ({
+        agent_id: a.agent_id,
+        agent_name: a.name,
+        description: a.description ?? undefined,
+      }));
       const tasks: TaskInTeam[] = tasksRaw.map((tk) => ({
         task_id: tk.task_id,
         task_name: tk.title,
@@ -340,11 +377,7 @@ async function fetchTeamsAndAgents(
       return {
         team_id: t.team_id,
         team_name: t.name,
-        agents: agentsRaw.map((a) => ({
-          agent_id: a.agent_id,
-          agent_name: a.name,
-          description: a.description ?? undefined,
-        })),
+        agents,
         tasks,
       };
     }),
@@ -828,7 +861,7 @@ async function handleSessionInitInner(
 
     let teams: TeamOption[];
     try {
-      const cfg = await fetchTeamsAndAgents(userId, config, metadataClient);
+      const cfg = await fetchTeamsAndAgents(userId, config, metadataClient, reqCtx.formToolMissing === true);
       teams = cfg.teams;
     } catch (err) {
       console.warn(
@@ -887,7 +920,12 @@ async function handleSessionInitInner(
     });
     const userDefaultResolution = userDefaultResult.resolution;
     const userDefaultFallbackReason = userDefaultResult.fallbackReason;
-    if (userDefaultResolution && userDefaultResolution.canRegister) {
+    // ⚠️ resetFlow gate (2026-11-15): mem:session-reset 的 pre-hook 刚把 state 置
+    // uninitialized + resetFlow=true，本请求**同一轮**会走到这里。若账户默认直接
+    // fast-register 回原三元组，reset 就自我取消了 —— 用户看到的正是"命令没反应"
+    // （实测 session 01a1def2: preset hit → register directly，form 从未弹出）。
+    // reset 语义就是"重新选"，两个 auto-register gate 都必须让位给表单。
+    if (!state?.resetFlow && userDefaultResolution && userDefaultResolution.canRegister) {
       // ⚠️ cachedTeams 来自 fetchTeamsAndAgents, 其 team.agents 只含 **owner=self**
       // 的 agent。但账户默认允许选 team 可见的、别人 owner 的 agent —— 若命中后者,
       // 下游 completeRegistration 的 findTeamIdForAgent(cachedTeams, agentId) 会匹配
@@ -948,18 +986,25 @@ async function handleSessionInitInner(
     // 与下面通用 header-preselect 块分开写:非 header-only agent(codebuddy /
     // workbuddy / dsh / opencode / codex)保留"只有 team → advance 到 agent form"
     // 的旧语义,form 对这些客户端本来就有效。
-    if (isHeaderOnlyAgent(agentSource)) {
+    //
+    // reqCtx.formToolMissing(CB CLI)在运行期把 codebuddy 也并入本分支:CLI 的
+    // body.tools 没有 ask_followup_question,任何 fallback form 都会变成
+    // "unsupported call" → maxRetries → 静默 bypass(丢失 team/agent/task 绑定)。
+    if (isHeaderOnlyAgent(agentSource) || reqCtx.formToolMissing) {
+      const headerOnlyReason = reqCtx.formToolMissing
+        ? `formToolMissing agent=${agentSource}`
+        : `header-only agent=${agentSource}`;
       const prHo = presetIdentity && config.headerAutoSelect?.enabled
         ? resolvePresetIdentity(teams, presetIdentity)
         : null;
       if (prHo && prHo.canRegister) {
         if (presetIdentity?.taskId && !prHo.taskId) {
           console.warn(
-            `[session-init:cb] session=${compositeKey} header-only agent=${agentSource} preset task_id="${presetIdentity.taskId}" not found in team=${prHo.teamId} → registering without a task (broad recall)`,
+            `[session-init:cb] session=${compositeKey} ${headerOnlyReason} preset task_id="${presetIdentity.taskId}" not found in team=${prHo.teamId} → registering without a task (broad recall)`,
           );
         }
         console.log(
-          `[session-init:cb] session=${compositeKey} header-only agent=${agentSource} preset hit team=${prHo.teamId} agent=${prHo.agentId} task=${prHo.taskId ?? "-"} → register directly`,
+          `[session-init:cb] session=${compositeKey} ${headerOnlyReason} preset hit team=${prHo.teamId} agent=${prHo.agentId} task=${prHo.taskId ?? "-"} → register directly`,
         );
         const seedState: SessionInitState = {
           status: "uninitialized",
@@ -982,7 +1027,12 @@ async function handleSessionInitInner(
       }
       // preset 未命中 → bypass(不弹 form,不注入)。下次请求头修对了会 recreate
       // uninitialized state,重新走一遍 canRegister 判定。
-      const reason = !presetIdentity
+      // presetIdentity 到达这里时可能是 `{}`（orchestrate 里 `?? {}` 兜底），
+      // 所以不能用真值判断"有没有 header"——必须看 teamId 本身。
+      // 旧代码因此把"完全没带 header"也报成 preset-partial，误导排查
+      // （实测 2026-11-15：CLI 未设 CODEBUDDY_CUSTOM_HEADERS 的会话全被
+      // 标成 preset-partial，而 preset team 实为 "-"）。
+      const reason = !presetIdentity?.teamId
         ? "no-preset-headers"
         : !config.headerAutoSelect?.enabled
           ? "header-auto-select-disabled"
@@ -990,7 +1040,10 @@ async function handleSessionInitInner(
             ? "preset-mismatch"
             : "preset-partial (team resolved but agent missing/invalid)";
       console.warn(
-        `[session-init:cb] session=${compositeKey} header-only agent=${agentSource} ${reason} → bypass (no form popup)`,
+        `[session-init:cb] session=${compositeKey} ${headerOnlyReason} ${reason} → bypass (no form popup)` +
+          ` [preset team=${presetIdentity?.teamId ?? "-"} agent=${presetIdentity?.agentId ?? "-"} task=${presetIdentity?.taskId ?? "-"}` +
+          ` resolved team=${prHo?.teamId ?? "-"} agent=${prHo?.agentId ?? "-"} canRegister=${prHo?.canRegister ?? false}` +
+          ` mismatch=${prHo?.hadMismatch ?? false} teams=${teams.length}]`,
       );
       await store.set(compositeKey, {
         status: "initialized",
@@ -1008,7 +1061,9 @@ async function handleSessionInitInner(
     }
 
     // ── Header-driven pre-selection: skip forms when identity is provided ──
-    if (presetIdentity && config.headerAutoSelect?.enabled) {
+    // ⚠️ 同上方 user-default gate: resetFlow (mem:session-reset) 时让位给表单，
+    // 否则 header preset 会立即重绑同一三元组，reset 自我取消 (2026-11-15)。
+    if (!state?.resetFlow && presetIdentity && config.headerAutoSelect?.enabled) {
       const pr = resolvePresetIdentity(teams, presetIdentity);
 
       if (pr.hadMismatch) {
@@ -1117,6 +1172,10 @@ async function handleSessionInitInner(
             selectedAgentId: soloAgent.agent_id,
             // v3.3 user-session-default: 透传账户默认失败原因 (若有)。
             defaultFallbackReason: pendingDefaultFallbackReason,
+            // resetFlow 贯穿 (2026-11-15): 否则 reset 后走 skipAssetConfirm 级联
+            // 完成注册时 runner 拿不到 resetFlow → mem:session-reset 无确认响应。
+            resetFlow: state?.resetFlow,
+            resetEpoch: state?.resetEpoch,
           };
           console.log(
             `[session-init:cb] session=${compositeKey} skipAssetConfirm only-team=${onlyTeam.team_id} only-agent=${soloAgent.agent_id} auto-select`,
@@ -1165,6 +1224,9 @@ async function handleSessionInitInner(
           selectedTeamId: onlyTeam.team_id,
           // v3.3 user-session-default: 透传账户默认失败原因 (若有)。
           defaultFallbackReason: pendingDefaultFallbackReason,
+          // resetFlow 贯穿 (2026-11-15, 同 skipAssetConfirm soloAgent seed)。
+          resetFlow: state?.resetFlow,
+          resetEpoch: state?.resetEpoch,
         });
         const fd: FormData = {
           teams, stage: nextStage, selectedTeamId: onlyTeam.team_id,
@@ -1186,6 +1248,9 @@ async function handleSessionInitInner(
         // v3.3 user-session-default: 同上。
         defaultFallbackReason: pendingDefaultFallbackReason,
         defaultFallbackNotice: pendingDefaultFallbackNotice,
+        // resetFlow 贯穿 (2026-11-15, 同 skipAssetConfirm soloAgent seed)。
+        resetFlow: state?.resetFlow,
+        resetEpoch: state?.resetEpoch,
       });
       console.log(
         `[session-init:cb] session=${compositeKey} → pending_team_select (teams=${teams.length})`,
@@ -1211,6 +1276,11 @@ async function handleSessionInitInner(
       // 由后续 completeRegistration 透传入 ClickHouse (preset_source 终态为 "form")。
       defaultFallbackReason: pendingDefaultFallbackReason,
       defaultFallbackNotice: pendingDefaultFallbackNotice,
+      // resetFlow/resetEpoch 贯穿 (2026-11-15, 对齐 claude-code/init.ts 同名分支):
+      // mem:session-reset 让位给表单后, 标记必须活到 completeRegistration,
+      // runner 才能在注册完成那一轮返回 reset 确认响应。
+      resetFlow: state?.resetFlow,
+      resetEpoch: state?.resetEpoch,
     });
     console.log(
       `[session-init:cb] session=${compositeKey} user=${userId} → pending_asset_confirm (teams=${teams.length})`,
@@ -1425,6 +1495,9 @@ async function handleSessionInitInner(
           // 否则下一步 agent/task 表单丢失提示。
           defaultFallbackReason: state.defaultFallbackReason,
           defaultFallbackNotice: state.defaultFallbackNotice,
+          // resetFlow 贯穿 (2026-11-15): 同 seed 系列修复。
+          resetFlow: state.resetFlow,
+          resetEpoch: state.resetEpoch,
         });
         console.log(
           `[session-init:cb] session=${compositeKey} only-team=${onlyTeam.team_id} → ${nextStatus}`,

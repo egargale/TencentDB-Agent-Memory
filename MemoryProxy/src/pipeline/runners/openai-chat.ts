@@ -638,6 +638,26 @@ export async function runOpenaiChatPipeline(
   const conversationId = resolveConversationId(c);
   const sessionKey = conversationId ?? resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
 
+  // ── CodeBuddy CLI form tool availability ────────────────────────────────
+  // CB IDE 插件注册了 `ask_followup_question`（proxy 用它弹 session-init 表单）；
+  // CB **CLI** 没有这个工具，只有 `AskUserQuestion`。proxy 若照旧发
+  // `ask_followup_question` tool_call，CLI 回 "unsupported call: ..." → extractor
+  // 匹配不到 → maxRetries → bypassed，团队资产/记忆全部静默丢失
+  // （2026-11-15 `docker logs tdai-proxy` 实证 3 连发）。
+  // 判定：CB 请求且 body.tools 非空且不含该工具 → 无 form UI。
+  // tools 为空数组/缺失表示纯对话/aux 请求（无法判定），保持既有行为。
+  const codebuddyFormToolMissing = agentSource === "codebuddy" && (() => {
+    const tools = (body as { tools?: unknown }).tools;
+    if (!Array.isArray(tools) || tools.length === 0) return false;
+    return !tools.some((t) => {
+      const fn = (t as { function?: { name?: string }; name?: string })?.function;
+      return (fn?.name ?? (t as { name?: string })?.name) === "ask_followup_question";
+    });
+  })();
+  if (codebuddyFormToolMissing) {
+    console.log(`[request-classify] session=${sessionKey} agent=codebuddy no-ask_followup_question tool (CLI) → header-preselect only, no form`);
+  }
+
   // ── Auth verification (user_key → user_id) ──────────────────────────────────────
   // Reuse the early verify result — it ran before body parse to decide the
   // system-user short-circuit; running verify again here would double the
@@ -734,11 +754,14 @@ export async function runOpenaiChatPipeline(
   }
 
   // ── mem:session-reset pre-hook (via shared stage) ──
+  // noFormClient: CB CLI 没有 ask_followup_question（同 dsh headless），reset 没有
+  // 可回退的 form —— 必须走“不支持”分支，否则重置 store 后 header preselect 会
+  // 立即重绑回原三元组，命令静默无效。
   const resetResp = await stageSessionResetPreHook({
     c, config, body, agentSource, sessionKey, spaceId, userId,
-    isAuxiliary, dshHeadless: _dshHeadless, isStream,
+    isAuxiliary, noFormClient: _dshHeadless || codebuddyFormToolMissing, isStream,
     protocol: "openai",
-    enabled: !isAuxiliary && !_dshHeadless && teamMemoryEnabled,
+    enabled: !isAuxiliary && !_dshHeadless && !codebuddyFormToolMissing && teamMemoryEnabled,
   });
   if (resetResp) return resetResp;
 
@@ -806,7 +829,7 @@ export async function runOpenaiChatPipeline(
           } else if (clientTools.length === 0) {
             questionsAsArray = false;
           }
-          return { stream: isStream, modelId: modelId as string, protocol: "openai", questionsAsArray, capabilities: _capabilities };
+          return { stream: isStream, modelId: modelId as string, protocol: "openai", questionsAsArray, capabilities: _capabilities, formToolMissing: codebuddyFormToolMissing };
         },
         buildInterceptResponse: (initResult) => initResult.response ?? null,
       });

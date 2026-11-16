@@ -704,7 +704,7 @@ export async function runAnthropicPipeline(
   // a08d67e9 dsh SSE tail fix 在 stage 内部的 header-only 拒绝响应处套 wrapper。
   const _resetResp = await stageSessionResetPreHook({
     c, config, body, agentSource, sessionKey, spaceId, userId,
-    isAuxiliary: false, dshHeadless: false, isStream,
+    isAuxiliary: false, noFormClient: false, isStream,
     protocol: "anthropic", enabled: memoryTurn && teamMemoryEnabled,
   });
   if (_resetResp) return stageResponseTailFix(_resetResp, agentSource, isStream);
