@@ -28,6 +28,7 @@
 import type { MemCommandContext, MemCommandResult } from "../types.js";
 import { t } from "../../i18n/lang.js";
 import { buildMemResponse } from "../response-builder.js";
+import { sanitizeTitle, TITLE_MAX_LEN } from "../utils.js";
 import {
   cancelPendingTaskAction,
   confirmPendingTaskAction,
@@ -35,7 +36,6 @@ import {
 } from "../../routes/session-task.js";
 
 const DESC_PREVIEW_LEN = 200;
-const TITLE_MAX_LEN = 40;
 
 function trimDesc(desc: string | undefined | null): string {
   const text = desc ?? "";
@@ -44,8 +44,7 @@ function trimDesc(desc: string | undefined | null): string {
 }
 
 function truncateTitle(raw: string): string {
-  const s = raw.trim();
-  return s.length > TITLE_MAX_LEN ? s.slice(0, TITLE_MAX_LEN) : s;
+  return sanitizeTitle(raw, TITLE_MAX_LEN);
 }
 
 /** 判定 args 是否是 confirm / cancel 子命令。仅当整体 trim 后严格等于时命中。 */
@@ -214,20 +213,26 @@ export async function executeCreateTask(ctx: MemCommandContext): Promise<MemComm
     );
   }
 
-  // 未绑分支：直接落库成功
+  // 未绑分支：直接落库成功（或复用了同标题的已有 Task）
+  const head = result.reused
+    ? t(`♻️ 复用已有同标题 Task（未新建），已绑定到本会话。\n\n`, `♻️ Reused an existing Task with the same title (no new Task created) and bound it to this session.\n\n`)
+    : t(`✅ Task 已创建并绑定到本会话。\n\n`, `✅ Task created and bound to this session.\n\n`);
+  const warnLine = result.error ? `\n\n⚠️ ${result.error}` : "";
   return finalize(
-    t(`✅ Task 已创建并绑定到本会话。\n\n`, `✅ Task created and bound to this session.\n\n`) +
+    head +
       t(`- **标题**：${result.title}\n`, `- **Title**: \${result.title}\n`) +
       t(`- **状态**：${result.status ?? "running"}\n`, `- **Status**: \${result.status ?? "running"}\n`) +
       t(`- **描述**：${trimDesc(result.description)}\n`, `- **Description**: \${trimDesc(result.description)}\n`) +
       `- **Task ID**：\`${result.taskId}\`\n\n` +
-      t(`后续可用 \`mem:update-task\` 追加进度。`, `Use \`mem:update-task\` later to record progress.`),
+      t(`后续可用 \`mem:update-task\` 追加进度。`, `Use \`mem:update-task\` later to record progress.`) +
+      warnLine,
     true,
     {
       task_id: result.taskId,
       title: result.title,
       description: result.description,
       status: result.status,
+      ...(result.reused ? { reused: true } : {}),
       ...(result.error ? { bind_warning: result.error } : {}),
     },
   );

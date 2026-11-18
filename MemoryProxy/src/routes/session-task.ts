@@ -27,8 +27,9 @@ import type { MemCommandMessage } from "../mem-command/types.js";
 import { getSessionStore } from "../session/store.js";
 import type { SessionInitState, SessionInfo } from "../session/types.js";
 import { getMetadataClient } from "../meta/client.js";
-import type { TaskEntity } from "../meta/client.js";
+import type { MetadataClient, TaskEntity } from "../meta/client.js";
 import { generateTaskDraft, type TaskDraftConfig } from "../mem-command/task-draft-generator.js";
+import { sanitizeTitle, TITLE_MAX_LEN } from "../mem-command/utils.js";
 import {
   clearPending,
   getPending,
@@ -132,6 +133,8 @@ export interface TaskFromSessionResult {
   status?: string;
   /** update 模式：LLM 判定为 "无需更新" 时 true —— 未落库 */
   noUpdateNeeded?: boolean;
+  /** create 模式：命中去重，复用了同标题的已有 Task（未新建） */
+  reused?: boolean;
   /**
    * create 模式：session 已绑定 task_id，此前的兼容位；新交互下会同时给 pending。
    * 保留字段名以兼容 HTTP handler 的响应外壳（respond() 里读它决定 409）。
@@ -313,6 +316,81 @@ function normalizeDesc(d: string | null | undefined): string | undefined {
   return d == null ? undefined : d;
 }
 
+/**
+ * Serialize find-or-create per (team, creator, title) inside this process.
+ *
+ * shortcut: per-proxy-instance only; two proxy replicas can still create the
+ * same title concurrently — add a partial unique index on
+ * (team_id, creator_user_id, title) WHERE status='running' if that matters.
+ */
+const createTaskLocks = new Map<string, Promise<unknown>>();
+
+async function withTitleLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = createTaskLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn);
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  createTaskLocks.set(key, tail);
+  try {
+    return await run;
+  } finally {
+    if (createTaskLocks.get(key) === tail) createTaskLocks.delete(key);
+  }
+}
+
+/**
+ * Reuse an existing same-title task: bind it to the session, link the current
+ * agent (the create path does this via `createTask({agent_id})`), and fill a
+ * missing description from the draft.
+ */
+async function reuseExistingTask(
+  client: MetadataClient,
+  resolved: ResolvedSession,
+  input: { sessionKey: string; agentSource: string },
+  existing: TaskEntity,
+  draft?: { description: string; warning?: string },
+): Promise<TaskFromSessionResult> {
+  const warnings: string[] = [];
+  if (draft?.warning) warnings.push(draft.warning);
+
+  let description = existing.description;
+  if (!description?.trim() && draft?.description.trim()) {
+    try {
+      const updated = await client.updateTask(existing.task_id, { description: draft.description });
+      description = updated.description;
+    } catch (err) {
+      warnings.push(`description fill failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  try {
+    await bindTaskIdToSession(input.sessionKey, input.agentSource, existing.task_id);
+  } catch (err) {
+    warnings.push(`bind failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  const agentId = resolved.sessionInfo.agent_id;
+  if (agentId) {
+    try {
+      await client.linkTaskAgent(existing.task_id, agentId);
+    } catch (err) {
+      warnings.push(`agent link failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return {
+    success: true,
+    reused: true,
+    taskId: existing.task_id,
+    title: existing.title,
+    description: normalizeDesc(description),
+    status: existing.status,
+    ...(warnings.length > 0 ? { error: warnings.join("; ") } : {}),
+  };
+}
+
 /** 由 resolved session 生成 pending key（含 team/agent/session 三元组）。 */
 function pendingKeyOf(resolved: ResolvedSession, agentSource: string, sessionKey: string): string {
   return makePendingKey({
@@ -372,6 +450,18 @@ export async function createTaskFromSession(
   const resolved = resolveSession(input.sessionKey, input.agentSource, input.config);
   if ("error" in resolved) return { success: false, error: resolved.error };
 
+  const client = getClientFromResolved(resolved, input.config, input.spaceId);
+  const lockedTitle = input.lockedTitle ? sanitizeTitle(input.lockedTitle, TITLE_MAX_LEN) : "";
+
+  // 有确定标题且未绑定 → 先查重；命中就复用，不必再花一次 LLM 草稿。
+  // 放在 draft 配置校验之前：复用不需要 LLM，配置坏了也应能幂等命中。
+  if (!resolved.currentTaskId && lockedTitle) {
+    const existing = await client
+      .findRunningTaskByTitle(resolved.teamId, resolved.userId, lockedTitle)
+      .catch(() => null);
+    if (existing) return reuseExistingTask(client, resolved, input, existing);
+  }
+
   const draftCfg = resolveTaskDraftConfig(input);
   if ("error" in draftCfg) return { success: false, error: draftCfg.error };
 
@@ -380,7 +470,7 @@ export async function createTaskFromSession(
     mode: "create",
     hint: input.hint,
     recentMessages: input.recentMessages,
-    ...(input.lockedTitle ? { lockedTitle: input.lockedTitle } : {}),
+    ...(lockedTitle ? { lockedTitle } : {}),
   });
 
   // Step 1a: 结果归一化
@@ -399,9 +489,9 @@ export async function createTaskFromSession(
   if (draft.ok) {
     finalTitle = draft.title;
     finalDescription = draft.description;
-  } else if (input.lockedTitle) {
+  } else if (lockedTitle) {
     // 有参数 + LLM 失败 → 降级：title 用参数、desc 留空
-    finalTitle = input.lockedTitle;
+    finalTitle = lockedTitle;
     finalDescription = "";
     draftFallbackWarning = `AI description failed (${draft.error}); saved with empty description`;
   } else {
@@ -411,11 +501,19 @@ export async function createTaskFromSession(
     draftFallbackWarning = `AI draft failed (${draft.error}); saved with default title, use mem:update-task to refine`;
   }
 
+  // Step 1b：落库前统一净化 title（硬约束，三条分支都要过）。
+  //
+  // 为什么放这里而不是各自赋值处：lockedTitle 直接来自客户端命令参数，可能带换行
+  //（2026-11-16 事故：11 条标题为 "Some title\n\nmem:create-task …" 直接落库）。
+  // LLM 分支虽由 generator 归一化过一次，但那是另一层的契约；落库是最后一道闸，
+  // 净化必须在这里兜住，任何上游改动都不能把换行带进 meta_tasks.title。
+  finalTitle = sanitizeTitle(finalTitle, TITLE_MAX_LEN);
+  if (!finalTitle) finalTitle = buildFallbackTaskTitle();
+
   // Step 2a：已绑真实 task → 写 pending，等 confirm 覆盖绑定
   if (resolved.currentTaskId) {
     let boundTitle: string | undefined;
     try {
-      const client = getClientFromResolved(resolved, input.config, input.spaceId);
       const t = await client.getTask(resolved.currentTaskId);
       boundTitle = t.title;
     } catch {
@@ -449,23 +547,43 @@ export async function createTaskFromSession(
     };
   }
 
-  // Step 2b：未绑 → 直接落库
-  const persisted = await doCreateAndBind(resolved, input, finalTitle, finalDescription);
-  if (!persisted.ok) return { success: false, error: persisted.error };
-  const created = persisted.task;
-  // 合并两类 warning：AI 兜底 + 绑定失败，都通过 error 字段透传给上层
-  // （字段名 error 是历史遗留；语义是"success=true 但有 warning"）
-  const combinedWarning = [draftFallbackWarning, persisted.bindWarning]
-    .filter((w): w is string => !!w)
-    .join("; ");
-  return {
-    success: true,
-    taskId: created.task_id,
-    title: created.title,
-    description: normalizeDesc(created.description),
-    status: created.status,
-    ...(combinedWarning ? { error: combinedWarning } : {}),
-  };
+  // Step 2b：未绑 → 串行执行「查重 → 落库」，避免并发重复提交各建一条。
+  //
+  // 为什么需要：客户端重试 / 用户重复执行 / 上一条命令被当成上下文回显，
+  // 都会让同一标题被反复创建（2026-11-16 事故：同一标题 12 条）。
+  // 已有同标题的 running Task → 直接复用并绑定，不再新建。
+  const lockKey = `task-create:${resolved.teamId}:${resolved.userId}:${finalTitle}`;
+  return withTitleLock(lockKey, async () => {
+    const existing = await client
+      .findRunningTaskByTitle(resolved.teamId, resolved.userId, finalTitle)
+      .catch(() => null);
+    if (existing) {
+      console.log(
+        `[task-dedup] hit: reuse task=${existing.task_id} title=${JSON.stringify(finalTitle)} team=${resolved.teamId}`,
+      );
+      return reuseExistingTask(client, resolved, input, existing, {
+        description: finalDescription,
+        ...(draftFallbackWarning ? { warning: draftFallbackWarning } : {}),
+      });
+    }
+
+    const persisted = await doCreateAndBind(resolved, input, finalTitle, finalDescription);
+    if (!persisted.ok) return { success: false, error: persisted.error };
+    const created = persisted.task;
+    // 合并两类 warning：AI 兜底 + 绑定失败，都通过 error 字段透传给上层
+    // （字段名 error 是历史遗留；语义是"success=true 但有 warning"）
+    const combinedWarning = [draftFallbackWarning, persisted.bindWarning]
+      .filter((w): w is string => !!w)
+      .join("; ");
+    return {
+      success: true,
+      taskId: created.task_id,
+      title: created.title,
+      description: normalizeDesc(created.description),
+      status: created.status,
+      ...(combinedWarning ? { error: combinedWarning } : {}),
+    };
+  });
 }
 
 /**
@@ -474,7 +592,7 @@ export async function createTaskFromSession(
  * 时间戳精确到分钟，可读性 & 可搜性平衡：
  *   - 用户看到"未命名任务_260818_1710"能马上定位是啥时候创的
  *   - 不用秒，避免连续创建重名 —— 而且分钟内连开两个 task 是异常操作
- * 保证 ≤ MAX_TITLE_LEN(40) 字。
+ * 保证 ≤ TITLE_MAX_LEN(40) 字。
  */
 function buildFallbackTaskTitle(): string {
   const now = new Date();

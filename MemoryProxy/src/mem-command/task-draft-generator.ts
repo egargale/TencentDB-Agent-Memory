@@ -12,6 +12,8 @@
  * 参考：docs/design/... TODO(阶段5) 补设计文档
  */
 
+import { TITLE_MAX_LEN } from "./utils.js";
+
 /** LLM 端点配置。 */
 export interface TaskDraftConfig {
   /** 总开关。默认 false —— 未启用时命令层直接返"未配置"错误。 */
@@ -90,7 +92,6 @@ export type TaskDraftResult =
  */
 const MAX_STATUS_LEN = 40;
 /** 输出 schema 上限。 */
-const MAX_TITLE_LEN = 40;
 const MAX_DESC_LEN = 300;
 /** 最近对话截断（防 prompt 过长）。 */
 const MAX_RECENT_MSGS = 30;
@@ -742,7 +743,7 @@ async function attemptDraftOnce(
   //   典型场景："Fix mem:create-task JSON parse failure"（42 字，会因超 40 拒绝）
   //   → 剥离 "Fix mem:create-task " → "JSON parse failure"（更精炼且不超字）
   const rawTitle = typeof obj.title === "string" ? stripCommandKeywords(obj.title) : obj.title;
-  const title = normalizeStr(rawTitle, MAX_TITLE_LEN, "clip");
+  const title = normalizeStr(rawTitle, TITLE_MAX_LEN, "clip");
   if (!title) {
     console.log(
       `[task-draft] mode=${input.mode} FAIL=title ${obs} keys=${JSON.stringify(Object.keys(obj))} title_type=${typeof obj.title} title_len=${typeof obj.title === "string" ? obj.title.length : "n/a"} obj_preview=${JSON.stringify(previewObj(obj))}`,

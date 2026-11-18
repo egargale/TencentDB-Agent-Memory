@@ -69,6 +69,29 @@ export function truncateArgs(args: string | undefined | null, max = 40): string 
   return oneLine.slice(0, max) + "...";
 }
 
+/**
+ * Task 标题长度上限（落库硬约束，命令层与 session 层共用）。
+ */
+export const TITLE_MAX_LEN = 40;
+
+/**
+ * 把任意来源的 Task 标题压成单行合法字符串。
+ *
+ * 为什么需要：`lockedTitle` 直接来自用户命令参数（`mem:create-task <args>`），
+ * 客户端可能把多行文本（如把上一条命令连同正文一起发上来）塞进 args。
+ * `String.prototype.trim()` 只去首尾，中间的 `\n` 会原样落库，导致 Task 标题
+ * 变成两行（2026-11-16 事故：11 条标题为 "Some title\n\nmem:create-task …"）。
+ *
+ * 与 truncateArgs 的区别：那个是日志展示用途，会把内容截断加 "..."；
+ * 本函数用于**落库**，只做净化不做丢失（除非超出 maxLen）。
+ */
+export function sanitizeTitle(raw: string | undefined | null, maxLen: number): string {
+  if (!raw) return "";
+  const oneLine = String(raw).replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
+  // Code-point-aware: a plain slice could split a surrogate pair and persist a lone surrogate.
+  return [...oneLine].length > maxLen ? [...oneLine].slice(0, maxLen).join("").trim() : oneLine;
+}
+
 export function extractSimpleMessages(input: unknown): MemCommandMessage[] {
   if (!Array.isArray(input)) return [];
 

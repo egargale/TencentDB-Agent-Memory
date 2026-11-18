@@ -320,6 +320,43 @@ export class MetadataClient {
     );
   }
 
+  /**
+   * 查询同一 creator 下是否有同标题的 running Task。
+   *
+   * 用于 create-task 幂等前置：同一用户重复执行 `mem:create-task <同样的标题>`
+   * （或 LLM 兜底回显了上一条命令）不应该再建一条新 Task。
+   * 服务端 task/list 支持 team_id + creator_user_id + status + title 精确过滤。
+   */
+  async findRunningTaskByTitle(
+    teamId: string,
+    creatorUserId: string,
+    title: string,
+  ): Promise<TaskEntity | null> {
+    if (!teamId || !creatorUserId || !title) return null;
+    try {
+      const res = await this.fetch<{ items?: TaskEntity[] }>("/v3/meta/task/list", {
+        team_id: teamId,
+        creator_user_id: creatorUserId,
+        status: "running",
+        title,
+        limit: 1,
+        offset: 0,
+      });
+      return res.items?.[0] ?? null;
+    } catch {
+      // 查询失败不能阻断创建（去重是优化，不是硬需求）；但要可见。
+      console.warn(
+        `[task-dedup] findRunningTaskByTitle failed team=${teamId} title=${JSON.stringify(title)}`,
+      );
+      return null;
+    }
+  }
+
+  /** Link a task to an agent (idempotent server-side). */
+  async linkTaskAgent(taskId: string, agentId: string): Promise<void> {
+    await this.fetch("/v3/meta/task-agent/link", { task_id: taskId, agent_id: agentId });
+  }
+
   /** Get a single agent by ID. Throws NotFoundError on 404. */
   async getAgent(agentId: string): Promise<AgentEntity> {
     return this.getOne<AgentEntity>("/v3/meta/agent/get", { agent_id: agentId }, "agent");
