@@ -5,6 +5,7 @@
 
 import type { CreditPricingConfig, CreditReportConfig } from "./types.js";
 import { getModelPricing, resolveRulePricingDetail, resolveTierPricing } from "./pricing.js";
+import { DEFAULT_SUPPORTED_AGENTS } from "./supported-agents.js";
 import { log } from "./report/log.js";
 
 export interface CreditReportRequest {
@@ -100,6 +101,16 @@ export function detectUsageProtocol(upstreamUrl: string): "anthropic" | "openai"
 }
 
 /**
+ * First path segments accepted for the `/<agent>/<spaceId>/...` form.
+ * Derived from the supported-agent registry so a new client only needs to be
+ * added there; `cursor` is kept extra because its profile is not enabled yet.
+ */
+const SPACE_ID_AGENT_SOURCES: ReadonlySet<string> = new Set([
+  ...DEFAULT_SUPPORTED_AGENTS.map((a) => a.agent_source),
+  "cursor",
+]);
+
+/**
  * Extract SpaceId from a request path like `/proxy/<spaceId>/v1/messages`.
  *
  * Behaviour:
@@ -124,7 +135,7 @@ export function extractSpaceIdFromPath(path: string): string | null {
   if (match) {
     const agent = safePath.split("/").filter(Boolean)[0] ?? "";
     // Only capture spaceId when the first segment looks like an agent name
-    if (/^(claude-code|codebuddy|codex|cursor|hermes|openclaw|workbuddy|dsh|opencode|pi)$/i.test(agent)) {
+    if (SPACE_ID_AGENT_SOURCES.has(agent.toLowerCase())) {
       return match[1] || null;
     }
   }

@@ -17,6 +17,7 @@ import { workbuddyStrategy } from "./workbuddy.js";
 import { dshStrategy } from "./dsh.js";
 import { opencodeStrategy } from "./opencode.js";
 import { piStrategy } from "./pi.js";
+import { ompStrategy } from "./omp.js";
 import { hermesStrategy } from "./hermes.js";
 import { openclawStrategy } from "./openclaw.js";
 import { defaultStrategy } from "./default.js";
@@ -43,6 +44,7 @@ export function resolveAgentStrategy(agentSource: string): AgentStrategy {
     case "dsh": return dshStrategy;
     case "opencode": return opencodeStrategy;
     case "pi": return piStrategy;
+    case "omp": return ompStrategy;
     // header-only 三方 (addendum §4.3) —— 独立实例而非共用, 便于将来单方特化
     case "hermes": return hermesStrategy;
     case "openclaw": return openclawStrategy;

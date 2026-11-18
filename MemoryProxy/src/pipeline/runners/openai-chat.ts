@@ -71,6 +71,7 @@ import {
 import { stagePrewarmInjection } from "../stages/prewarm-injection.js";
 import { stageAssetCapabilities } from "../stages/asset-capabilities.js";
 import { stageTeamMemorySwitch } from "../stages/team-memory-switch.js";
+import { resolveConversationId, resolveConversationIdFromBody, stripBodyConversationMarker } from "../../session/session-key.js";
 import { stageSessionBypass } from "../stages/session-bypass.js";
 import { stageSessionInitOrchestrate } from "../stages/session-init-orchestrate.js";
 import { stageInjectionRunner } from "../stages/injection-runner.js";
@@ -633,9 +634,10 @@ export async function runOpenaiChatPipeline(
     lcHeaders[k.toLowerCase()] = v;
   }
 
-  // ── Session key: prefer conversation header, fallback to agent profile ───────────
-  const { resolveConversationId } = await import("../../session/session-key.js");
-  const conversationId = resolveConversationId(c);
+  // ── Session key: prefer conversation header, fallback to body marker/profile ─────
+  const bodyConversationId = resolveConversationIdFromBody(body);
+  if (bodyConversationId) stripBodyConversationMarker(body);
+  const conversationId = resolveConversationId(c) ?? bodyConversationId;
   const sessionKey = conversationId ?? resolveSessionKey(config, lcHeaders, c.req.path, body, keyId);
 
   // ── CodeBuddy CLI form tool availability ────────────────────────────────

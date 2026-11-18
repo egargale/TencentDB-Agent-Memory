@@ -21,6 +21,7 @@ import type { TeamOption } from "./types.js";
  * form UI** to fall back on:
  *
  *   - `pi`       — openai-chat, no `ask_followup_question` tool in body.tools
+ *   - `omp`      — Pi fork (oh-my-pi), same tool set as pi
  *   - `hermes`   — anthropic, no ask-user tool available
  *   - `openclaw` — anthropic, same as hermes
  *
@@ -38,6 +39,7 @@ export const HEADER_ONLY_AGENTS: ReadonlySet<string> = new Set([
   "hermes",
   "openclaw",
   "pi",
+  "omp",
 ]);
 
 /** True when the agent has no interactive form UI to fall back on. */

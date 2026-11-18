@@ -481,6 +481,7 @@ function buildPipelineBundle(config: ProxyConfig): PipelineBundle {
       ["claude-code", new ClaudeCodeProfile()],
       ["workbuddy", new WorkbuddyProfile()],
       ["pi", new PiProfile()],
+      ["omp", new PiProfile()],
       // ["cursor", new CursorProfile()],
     ]),
     // Legacy fallback: scan system prompt content (for backward compat).

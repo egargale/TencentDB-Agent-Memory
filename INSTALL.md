@@ -416,6 +416,7 @@ The Proxy supports 9 agent clients. **Full setup instructions, adaptation detail
 | **Hermes** | `~/.hermes/config.yaml` + header preselect | [`agents/hermes/`](./agents/hermes/) |
 | **OpenClaw** | `~/.openclaw/openclaw.json` + header preselect | [`agents/openclaw/`](./agents/openclaw/) |
 | **Pi** | `pi-plugin` extension (env vars) | [`MemoryCore/pi-plugin/`](./MemoryCore/pi-plugin/) |
+| **OMP** (oh-my-pi, Pi fork) | omp extension + env vars | [`agents/omp/`](./agents/omp/) |
 | **Other platforms** | Header preselect (generic) | [`agents/README.md`](./agents/README.md) |
 
 The proxy pipeline in order: `auth` (validates user_key) → `sessionInit`
